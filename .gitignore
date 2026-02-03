@@ -1,0 +1,54 @@
+
+__pycache__/
+
+*.py[cod]
+
+*$py.class
+
+*.so
+
+.Python
+
+venv/
+
+env/
+
+*.egg-info/
+
+dist/
+
+build/
+
+# Node
+
+node_modules/
+
+npm-debug.log
+
+yarn-error.log
+
+# Environment
+
+.env
+
+.env.local
+
+.DS_Store
+
+# IDEs
+
+.vscode/
+
+.idea/
+
+
+*.swp
+
+*.swo
+
+# Logs
+
+logs/
+
+*.log
+
