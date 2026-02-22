@@ -207,7 +207,8 @@ class ApplicationResponse(BaseModel):
     applied_at: datetime
     candidate: Optional[CandidateResponse] = None
     job: Optional[JobResponse] = None
-    
+    screenings: List['ScreeningResponse'] = []
+
     class Config:
         from_attributes = True
 
@@ -242,6 +243,10 @@ class ScreeningResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+# Resolve forward reference in ApplicationResponse
+ApplicationResponse.model_rebuild()
 
 
 # Dashboard Stats

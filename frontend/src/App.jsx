@@ -9,6 +9,10 @@ import Jobs from './pages/Jobs';
 import Candidates from './pages/Candidates';
 import Applications from './pages/Applications';
 import Screenings from './pages/Screenings';
+import BrowseJobs from './pages/BrowseJobs';
+import ApplyJob from './pages/ApplyJob';
+import CandidateStatus from './pages/CandidateStatus';
+import JobDetail from './pages/JobDetail';
 
 function App() {
   return (
@@ -29,6 +33,7 @@ function App() {
           >
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/jobs" element={<Jobs />} />
+            <Route path="/jobs/:id" element={<JobDetail />} />
             <Route path="/candidates" element={<Candidates />} />
             <Route path="/applications" element={<Applications />} />
             <Route path="/screenings" element={<Screenings />} />
@@ -36,9 +41,14 @@ function App() {
             <Route path="/help" element={<Help />} />
           </Route>
           
+          {/* Public candidate routes (no auth, no Layout) */}
+          <Route path="/browse-jobs" element={<BrowseJobs />} />
+          <Route path="/browse-jobs/:id" element={<ApplyJob />} />
+          <Route path="/my-applications" element={<CandidateStatus />} />
+
           {/* Redirect root to dashboard */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          
+
           {/* 404 catch-all */}
           <Route path="*" element={<NotFound />} />
         </Routes>

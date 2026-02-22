@@ -88,7 +88,7 @@ const Applications = () => {
                 <tr className="bg-slate-50 border-b border-slate-200">
                   <th className="table-header">Candidate</th>
                   <th className="table-header">Job</th>
-                  <th className="table-header">Match Score</th>
+                  <th className="table-header">Resume Match</th>
                   <th className="table-header">AI Recommendation</th>
                   <th className="table-header">Status</th>
                   <th className="table-header">Applied</th>
@@ -114,11 +114,10 @@ const Applications = () => {
                       <div className="text-sm text-slate-500">{app.job?.department}</div>
                     </td>
                     <td className="table-cell">
-                      {app.match_score && (
-                        <div className={`score-badge ${getScoreColor(app.match_score)}`}>
-                          {Math.round(app.match_score)}%
-                        </div>
-                      )}
+                      {app.match_score != null
+                        ? <div className={`score-badge ${getScoreColor(app.match_score)}`}>{Math.round(app.match_score)}%</div>
+                        : <span className="text-xs text-slate-400">No resume</span>
+                      }
                     </td>
                     <td className="table-cell">
                       {app.ai_recommendation && (

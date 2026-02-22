@@ -5,7 +5,6 @@ from typing import List, Optional
 from .. import models, schemas, auth
 from ..database import get_db
 import json
-import random
 
 router = APIRouter(prefix="/api/applications", tags=["Applications"])
 
@@ -59,20 +58,17 @@ async def create_application(
             detail="This candidate has already applied for this job"
         )
     
-    # Calculate AI match score (simplified version)
-    match_score = calculate_match_score(job, candidate)
-    
-    # Create application
+    # Create application — scores are null until a resume is analysed
     new_application = models.Application(
         job_id=application_data.job_id,
         candidate_id=candidate.id,
         cover_letter=application_data.cover_letter,
         status="pending",
-        match_score=match_score["overall"],
-        skills_match=match_score["skills"],
-        experience_match=match_score["experience"],
-        ai_summary=match_score["summary"],
-        ai_recommendation=match_score["recommendation"]
+        match_score=None,
+        skills_match=None,
+        experience_match=None,
+        ai_summary=None,
+        ai_recommendation=None,
     )
     
     db.add(new_application)
@@ -103,9 +99,10 @@ async def get_applications(
     """Get all applications with optional filtering"""
     query = db.query(models.Application).options(
         joinedload(models.Application.candidate),
-        joinedload(models.Application.job)
+        joinedload(models.Application.job),
+        joinedload(models.Application.screenings)
     )
-    
+
     # Filter by job
     if job_id:
         query = query.filter(models.Application.job_id == job_id)
@@ -175,6 +172,47 @@ async def get_application_stats(
     }
 
 
+@router.post("/bulk-invite-screening")
+async def bulk_invite_screening(
+    payload: dict,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Bulk invite applications to screening"""
+    application_ids = payload.get("application_ids", [])
+    invited = 0
+    skipped = 0
+
+    for app_id in application_ids:
+        application = db.query(models.Application).filter(models.Application.id == app_id).first()
+        if not application:
+            skipped += 1
+            continue
+
+        # Skip if an active screening already exists
+        existing = db.query(models.Screening).filter(
+            models.Screening.application_id == app_id,
+            models.Screening.status.in_(["scheduled", "in_progress"])
+        ).first()
+
+        if existing:
+            skipped += 1
+            continue
+
+        # Create screening record and update application status
+        screening = models.Screening(
+            application_id=app_id,
+            status="scheduled"
+        )
+        db.add(screening)
+        application.status = "screening"
+        invited += 1
+
+    db.commit()
+    log_activity(db, current_user.id, "bulk_invite_screening", details=f"invited={invited},skipped={skipped}")
+    return {"invited": invited, "skipped": skipped}
+
+
 @router.get("/{application_id}", response_model=schemas.ApplicationResponse)
 async def get_application(
     application_id: int,
@@ -184,7 +222,8 @@ async def get_application(
     """Get a specific application by ID"""
     application = db.query(models.Application).options(
         joinedload(models.Application.candidate),
-        joinedload(models.Application.job)
+        joinedload(models.Application.job),
+        joinedload(models.Application.screenings)
     ).filter(models.Application.id == application_id).first()
     
     if not application:
@@ -299,38 +338,6 @@ async def delete_application(
     log_activity(db, current_user.id, "application_deleted", "application", application_id)
     
     return None
-
-
-def calculate_match_score(job: models.Job, candidate: models.Candidate) -> dict:
-    """Calculate AI match score between job and candidate"""
-    # This is a simplified scoring algorithm
-    # In production, you would use embeddings and ML models
-    
-    skills_score = random.uniform(60, 95)
-    experience_score = random.uniform(55, 90)
-    overall_score = (skills_score * 0.6 + experience_score * 0.4)
-    
-    # Generate recommendation based on score
-    if overall_score >= 80:
-        recommendation = "strong_yes"
-        summary = f"Strong match for {job.title}. Candidate shows excellent alignment with job requirements."
-    elif overall_score >= 65:
-        recommendation = "yes"
-        summary = f"Good match for {job.title}. Candidate meets most requirements."
-    elif overall_score >= 50:
-        recommendation = "maybe"
-        summary = f"Potential match for {job.title}. Some requirements met, further review recommended."
-    else:
-        recommendation = "no"
-        summary = f"Weak match for {job.title}. Candidate may not meet key requirements."
-    
-    return {
-        "overall": round(overall_score, 1),
-        "skills": round(skills_score, 1),
-        "experience": round(experience_score, 1),
-        "summary": summary,
-        "recommendation": recommendation
-    }
 
 
 def log_activity(db: Session, user_id: int, action: str, entity_type: str = None, entity_id: int = None, details: str = None):

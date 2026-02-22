@@ -290,11 +290,10 @@ const Dashboard = () => {
                       <div className="text-sm text-slate-500 truncate">{app.job_title}</div>
                     </div>
                     <div className="text-right">
-                      {app.match_score && (
-                        <div className={`score-badge ${getScoreColor(app.match_score)} mb-1`}>
-                          {Math.round(app.match_score)}%
-                        </div>
-                      )}
+                      {app.match_score != null
+                        ? <div className={`score-badge ${getScoreColor(app.match_score)} mb-1`}>{Math.round(app.match_score)}%</div>
+                        : <span className="text-xs text-slate-400 block mb-1">No resume</span>
+                      }
                       <span className={`badge ${getStatusBadge(app.status)}`}>
                         {app.status}
                       </span>

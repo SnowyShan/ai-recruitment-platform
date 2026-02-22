@@ -176,6 +176,13 @@ const Login = () => {
               Create account
             </Link>
           </p>
+
+          <p className="mt-4 text-center text-slate-400 text-sm">
+            Looking to apply for jobs?{' '}
+            <Link to="/browse-jobs" className="text-primary-600 hover:text-primary-700 font-medium">
+              Browse openings →
+            </Link>
+          </p>
         </div>
       </div>
     </div>

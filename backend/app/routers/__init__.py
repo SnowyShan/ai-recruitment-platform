@@ -4,12 +4,14 @@ from .candidates import router as candidates_router
 from .applications import router as applications_router
 from .screening import router as screening_router
 from .dashboard import router as dashboard_router
+from .public import router as public_router
 
 __all__ = [
     "auth_router",
-    "jobs_router", 
+    "jobs_router",
     "candidates_router",
     "applications_router",
     "screening_router",
-    "dashboard_router"
+    "dashboard_router",
+    "public_router",
 ]

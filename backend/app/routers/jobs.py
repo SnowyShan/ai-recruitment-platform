@@ -93,6 +93,46 @@ async def get_job_stats(
     }
 
 
+@router.get("/{job_id}/pipeline")
+async def get_job_pipeline(
+    job_id: int,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get pipeline funnel data for a specific job"""
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+    applications = db.query(models.Application).filter(models.Application.job_id == job_id)
+    total = applications.count()
+
+    avg_score = db.query(func.avg(models.Application.match_score)).filter(
+        models.Application.job_id == job_id,
+        models.Application.match_score.isnot(None)
+    ).scalar() or 0
+
+    counts = {}
+    for row in (
+        db.query(models.Application.status, func.count(models.Application.id))
+        .filter(models.Application.job_id == job_id)
+        .group_by(models.Application.status)
+        .all()
+    ):
+        counts[row[0]] = row[1]
+
+    return {
+        "total": total,
+        "avg_match_score": round(avg_score, 1),
+        "funnel": [
+            {"stage": "applied",     "count": total},
+            {"stage": "screening",   "count": counts.get("screening", 0)},
+            {"stage": "shortlisted", "count": counts.get("shortlisted", 0)},
+            {"stage": "rejected",    "count": counts.get("rejected", 0)},
+        ]
+    }
+
+
 @router.get("/{job_id}", response_model=schemas.JobResponse)
 async def get_job(
     job_id: int,

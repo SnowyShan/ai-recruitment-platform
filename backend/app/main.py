@@ -12,7 +12,8 @@ from .routers import (
     candidates_router,
     applications_router,
     screening_router,
-    dashboard_router
+    dashboard_router,
+    public_router,
 )
 
 load_dotenv()
@@ -56,6 +57,7 @@ app.include_router(candidates_router)
 app.include_router(applications_router)
 app.include_router(screening_router)
 app.include_router(dashboard_router)
+app.include_router(public_router)
 
 
 @app.get("/")

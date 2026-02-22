@@ -2,6 +2,12 @@ import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
+// Unauthenticated axios instance for public endpoints
+const publicApi = axios.create({
+  baseURL: API_BASE_URL,
+  headers: { 'Content-Type': 'application/json' },
+});
+
 const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -46,6 +52,7 @@ export const authAPI = {
 export const jobsAPI = {
   getAll: (params) => api.get('/api/jobs', { params }),
   getById: (id) => api.get(`/api/jobs/${id}`),
+  getPipeline: (id) => api.get(`/api/jobs/${id}/pipeline`),
   create: (data) => api.post('/api/jobs', data),
   update: (id, data) => api.put(`/api/jobs/${id}`, data),
   delete: (id) => api.delete(`/api/jobs/${id}`),
@@ -65,7 +72,7 @@ export const candidatesAPI = {
     const formData = new FormData();
     formData.append('file', file);
     return api.post(`/api/candidates/${id}/upload-resume`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': undefined }
     });
   },
   getApplications: (id) => api.get(`/api/candidates/${id}/applications`),
@@ -80,6 +87,7 @@ export const applicationsAPI = {
   delete: (id) => api.delete(`/api/applications/${id}`),
   shortlist: (id) => api.post(`/api/applications/${id}/shortlist`),
   reject: (id) => api.post(`/api/applications/${id}/reject`),
+  bulkInviteScreening: (ids) => api.post('/api/applications/bulk-invite-screening', { application_ids: ids }),
   getStats: (params) => api.get('/api/applications/stats', { params }),
 };
 
@@ -104,6 +112,16 @@ export const dashboardAPI = {
   getRecentApplications: (params) => api.get('/api/dashboard/recent-applications', { params }),
   getScreeningPerformance: (params) => api.get('/api/dashboard/screening-performance', { params }),
   getHiringFunnel: (params) => api.get('/api/dashboard/hiring-funnel', { params }),
+};
+
+// Public API (no auth token)
+export const publicAPI = {
+  getJobs: (params) => publicApi.get('/api/public/jobs', { params }),
+  getJob: (id) => publicApi.get(`/api/public/jobs/${id}`),
+  apply: (formData) => publicApi.post('/api/public/apply', formData, {
+    headers: { 'Content-Type': undefined },
+  }),
+  getStatus: (email) => publicApi.get('/api/public/status', { params: { email } }),
 };
 
 export default api;
