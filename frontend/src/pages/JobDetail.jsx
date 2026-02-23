@@ -16,6 +16,7 @@ import {
   Square,
   ChevronRight,
   ChevronDown,
+  Zap,
 } from 'lucide-react';
 import { jobsAPI, applicationsAPI, screeningsAPI } from '../services/api';
 
@@ -238,6 +239,12 @@ function screeningResult(s) {
   return { label: 'Fail', cls: 'bg-red-100 text-red-600' };
 }
 
+function SourceBadge({ source }) {
+  if (source === 'auto') return <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700">Auto</span>;
+  if (source === 'bulk') return <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-100 text-violet-700">Bulk</span>;
+  return null;
+}
+
 // ─── Candidate Row ────────────────────────────────────────────────────────────
 
 function CandidateRow({ app, selected, onToggle, onAction, onOpenNote }) {
@@ -246,6 +253,9 @@ function CandidateRow({ app, selected, onToggle, onAction, onOpenNote }) {
   const screenings = (app.screenings || [])
     .slice()
     .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+  const latestScreening = screenings.length > 0 ? screenings[screenings.length - 1] : null;
+  const isAutoInvited = latestScreening?.source === 'auto';
 
   // Only block invite if a screening is currently active (scheduled or in_progress).
   // Completed, cancelled, or no prior screenings → recruiter can always send a new invite.
@@ -271,7 +281,14 @@ function CandidateRow({ app, selected, onToggle, onAction, onOpenNote }) {
 
         {/* Candidate */}
         <td className="px-4 py-3">
-          <div className="font-medium text-slate-800 text-sm">{app.candidate?.full_name}</div>
+          <div className="font-medium text-slate-800 text-sm flex items-center gap-1.5">
+            {app.candidate?.full_name}
+            {isAutoInvited && (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 text-[10px] font-semibold" title="Auto-invited to screening">
+                <Zap className="w-2.5 h-2.5" /> Auto-invited
+              </span>
+            )}
+          </div>
           <div className="text-xs text-slate-500">{app.candidate?.email}</div>
           {screenings.length > 0 && (
             <button
@@ -363,7 +380,7 @@ function CandidateRow({ app, selected, onToggle, onAction, onOpenNote }) {
                     const result = screeningResult(s);
                     return (
                       <tr key={s.id}>
-                        <td className="px-3 py-2 font-medium text-slate-700">#{i + 1}</td>
+                        <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">#{i + 1}<SourceBadge source={s.source} /></td>
                         <td className="px-3 py-2 text-slate-500 whitespace-nowrap">
                           {formatDate(s.scheduled_at || s.created_at)}
                         </td>

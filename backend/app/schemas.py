@@ -239,14 +239,26 @@ class ScreeningResponse(BaseModel):
     recommendation: Optional[str] = None
     ai_evaluation: Optional[str] = None
     notes: Optional[str] = None
+    source: Optional[str] = None
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 
 
 # Resolve forward reference in ApplicationResponse
 ApplicationResponse.model_rebuild()
+
+
+# Settings Schemas
+class SettingsResponse(BaseModel):
+    auto_invite_screening: bool
+    auto_invite_threshold: int
+
+
+class SettingsUpdate(BaseModel):
+    auto_invite_screening: Optional[bool] = None
+    auto_invite_threshold: Optional[int] = Field(None, ge=1, le=100)
 
 
 # Dashboard Stats

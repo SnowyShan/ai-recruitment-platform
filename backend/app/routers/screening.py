@@ -45,7 +45,8 @@ async def create_screening(
     new_screening = models.Screening(
         application_id=screening_data.application_id,
         scheduled_at=screening_data.scheduled_at or datetime.utcnow(),
-        status="scheduled"
+        status="scheduled",
+        source="manual",
     )
     
     db.add(new_screening)

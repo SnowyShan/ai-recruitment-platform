@@ -114,6 +114,12 @@ export const dashboardAPI = {
   getHiringFunnel: (params) => api.get('/api/dashboard/hiring-funnel', { params }),
 };
 
+// Settings API
+export const settingsAPI = {
+  get: () => api.get('/api/settings'),
+  update: (data) => api.put('/api/settings', data),
+};
+
 // Public API (no auth token)
 export const publicAPI = {
   getJobs: (params) => publicApi.get('/api/public/jobs', { params }),

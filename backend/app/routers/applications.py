@@ -202,7 +202,8 @@ async def bulk_invite_screening(
         # Create screening record and update application status
         screening = models.Screening(
             application_id=app_id,
-            status="scheduled"
+            status="scheduled",
+            source="bulk",
         )
         db.add(screening)
         application.status = "screening"

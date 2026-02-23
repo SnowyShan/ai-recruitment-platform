@@ -190,6 +190,32 @@ async def public_apply(
     db.commit()
     db.refresh(application)
 
+    # ── Auto-invite to screening if enabled and score meets threshold ─────
+    if application.match_score is not None:
+        auto_enabled_row = db.query(models.Setting).filter(models.Setting.key == "auto_invite_screening").first()
+        auto_enabled = auto_enabled_row and auto_enabled_row.value == "true"
+
+        if auto_enabled:
+            threshold_row = db.query(models.Setting).filter(models.Setting.key == "auto_invite_threshold").first()
+            threshold = int(threshold_row.value) if threshold_row else 75
+
+            if application.match_score >= threshold:
+                # Guard against duplicate screening
+                existing_screening = db.query(models.Screening).filter(
+                    models.Screening.application_id == application.id,
+                    models.Screening.status.in_(["scheduled", "in_progress"]),
+                ).first()
+
+                if not existing_screening:
+                    screening = models.Screening(
+                        application_id=application.id,
+                        status="scheduled",
+                        source="auto",
+                    )
+                    db.add(screening)
+                    application.status = "screening"
+                    db.commit()
+
     log_activity(db, None, "public_application_submitted", "application", application.id)
 
     return {

@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 import os
 from dotenv import load_dotenv
 
+from sqlalchemy import inspect, text
 from .database import engine, Base
 from .routers import (
     auth_router,
@@ -14,6 +15,7 @@ from .routers import (
     screening_router,
     dashboard_router,
     public_router,
+    settings_router,
 )
 
 load_dotenv()
@@ -21,9 +23,17 @@ load_dotenv()
 # Create database tables on startup
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create tables
+    # Create tables (new tables only — does not alter existing ones)
     Base.metadata.create_all(bind=engine)
-    
+
+    # Lightweight column migrations for existing tables
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        if "screenings" in insp.get_table_names():
+            cols = [c["name"] for c in insp.get_columns("screenings")]
+            if "source" not in cols:
+                conn.execute(text("ALTER TABLE screenings ADD COLUMN source VARCHAR(20) DEFAULT 'manual'"))
+
     # Create uploads directory
     upload_dir = os.getenv("UPLOAD_DIR", "./uploads")
     os.makedirs(upload_dir, exist_ok=True)
@@ -58,6 +68,7 @@ app.include_router(applications_router)
 app.include_router(screening_router)
 app.include_router(dashboard_router)
 app.include_router(public_router)
+app.include_router(settings_router)
 
 
 @app.get("/")
@@ -90,6 +101,7 @@ async def api_info():
             "candidates": "/api/candidates",
             "applications": "/api/applications",
             "screenings": "/api/screenings",
-            "dashboard": "/api/dashboard"
+            "dashboard": "/api/dashboard",
+            "settings": "/api/settings"
         }
     }
