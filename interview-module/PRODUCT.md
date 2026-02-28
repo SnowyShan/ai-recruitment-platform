@@ -7,14 +7,7 @@
 
 ## Overview
 
-A standalone AI-powered interview module that conducts structured technical and behavioral interviews with candidates via voice. The module can run independently or be integrated into TalentBridge (or any other ATS) as a microservice.
-
-The module has two target products:
-
-1. **TalentBridge integration** — B2B recruitment platform where companies own their question banks, recruiters configure interviews per job, and candidates are invited via email after applying.
-2. **iOS Mock Interview** (future, separate product) — Consumer product where the question bank is owned and curated by the product team. No recruiter layer. Fixed questions per domain.
-
-Both products share the same interview engine.
+A standalone AI-powered interview module that conducts structured technical and behavioral interviews with candidates via voice. Designed as a standalone microservice that integrates with TalentBridge but can be wired into any ATS.
 
 ---
 
@@ -58,7 +51,7 @@ Both products share the same interview engine.
 ### Two question types
 
 **1. Hardcoded (domain questions)**
-- Authored once, stored in a question bank
+- Authored once, stored in the question bank
 - Consistent across all candidates for a role
 - Example: *"What is the difference between struct and class in Swift?"*
 - Have an optional known-good answer for strict evaluation
@@ -70,17 +63,12 @@ Both products share the same interview engine.
 - Example: *"You mentioned leading a team of 4 at Acme Corp — tell me about a time that team disagreed on a technical direction. How did you handle it?"*
 - Small in number (2–4 per session)
 
-### Question bank (TalentBridge)
+### Question bank
 - Questions are owned by the company (tenant)
 - Stored in DB, editable by recruiters
 - Recruiter selects questions per job posting from the company's bank
 - New questions added by a recruiter are saved to the bank for reuse
 - Questions have: category, subcategory, domain, difficulty, expected answer points, active flag
-
-### Question bank (iOS Mock Interview product)
-- Owned and curated by the product team
-- Hosted server-side, not editable by end users
-- Fixed per domain, versioned
 
 ---
 
@@ -114,12 +102,12 @@ Both products share the same interview engine.
    → Full transcript + question set + rubric → structured report
    → Report stored, linked to session
 
-7. Report available to recruiter (TalentBridge) or candidate (iOS mock)
+7. Report available to recruiter via TalentBridge
 ```
 
 ---
 
-## Recruiter Configuration (TalentBridge)
+## Recruiter Configuration
 
 Per job posting, a recruiter can configure:
 
@@ -237,7 +225,7 @@ Session
   ├── created_at
   └── completed_at
 
-Question (bank, TalentBridge)
+Question (bank)
   ├── id
   ├── company_id (tenant)
   ├── domain
