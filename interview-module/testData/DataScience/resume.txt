@@ -1,0 +1,42 @@
+Priya Nair
+priya.nair@email.com | linkedin.com/in/priyanair | github.com/priyanair
+San Francisco, CA
+
+EDUCATION
+B.S. Statistics, University of California, Davis — May 2024
+GPA: 3.7 | Relevant Coursework: Machine Learning, Statistical Inference, Linear Algebra, Database Systems, Data Visualization
+
+SKILLS
+Languages: Python, SQL, R
+Libraries: pandas, NumPy, scikit-learn, matplotlib, seaborn, statsmodels
+Tools: Jupyter Notebook, Git, Tableau, Google Colab
+Concepts: Supervised/Unsupervised Learning, Hypothesis Testing, A/B Testing, Feature Engineering, Cross-Validation
+
+EXPERIENCE
+
+Data Science Intern — RetailIQ, San Francisco, CA (Jun 2023 – Aug 2023)
+- Built a customer churn prediction model using logistic regression and random forest; achieved 82% accuracy on held-out test set
+- Cleaned and merged 3 datasets totaling 1.2M rows using pandas; handled missing values and outliers
+- Automated a weekly sales reporting pipeline in Python, reducing manual effort by 4 hours/week
+- Presented findings to the product and marketing teams; churn model was adopted for a targeted re-engagement campaign
+
+Research Assistant — UC Davis Statistics Dept. (Sep 2022 – May 2023)
+- Assisted professor on a study analyzing food insecurity trends using US Census data
+- Performed exploratory data analysis, correlation analysis, and regression modelling in R and Python
+- Contributed to a paper submitted to a regional statistics conference
+
+PROJECTS
+
+Movie Recommendation System (Personal Project)
+- Built a collaborative filtering recommendation system using the MovieLens dataset
+- Implemented user-based and item-based CF from scratch; compared against SVD-based matrix factorization using scikit-learn
+- Evaluated using RMSE and precision@k; item-based CF achieved RMSE of 0.91
+
+Sentiment Analysis on Reddit Comments (Capstone Project)
+- Scraped and cleaned 50k Reddit comments using Python (PRAW, BeautifulSoup)
+- Fine-tuned a pre-trained DistilBERT model using HuggingFace Transformers for binary sentiment classification
+- Achieved 89% accuracy; wrote a technical report and presented to a panel of faculty
+
+CERTIFICATIONS
+- Google Data Analytics Professional Certificate (2023)
+- Kaggle — Intermediate Machine Learning (2023)

@@ -1,0 +1,39 @@
+Job Title: Junior Data Scientist
+Department: Data & Analytics
+Location: Remote (US)
+Employment Type: Full-Time
+
+About the Role
+We are looking for a curious and motivated Junior Data Scientist to join our growing Data & Analytics team. You will work closely with senior data scientists and business stakeholders to build models, analyze data, and surface insights that drive product and business decisions.
+
+This is a great opportunity for someone early in their career who wants to work across the full data science lifecycle — from data wrangling and exploration to model building and deployment.
+
+Responsibilities
+- Clean, transform, and explore large datasets to identify patterns and trends
+- Build, evaluate, and iterate on machine learning models for classification, regression, and clustering tasks
+- Collaborate with data engineers to access and prepare data from various sources
+- Communicate findings clearly to both technical and non-technical stakeholders
+- Write clean, well-documented Python code and maintain reproducible notebooks
+- Assist in deploying and monitoring models in production
+
+Requirements
+- Bachelor's degree in Computer Science, Statistics, Mathematics, or a related quantitative field
+- 0–2 years of experience in data science or a related role (internships count)
+- Proficiency in Python and core data science libraries: pandas, NumPy, scikit-learn
+- Familiarity with supervised and unsupervised machine learning algorithms
+- Understanding of statistics: hypothesis testing, distributions, regression
+- Experience with data visualization tools (matplotlib, seaborn, or similar)
+- Comfortable working with SQL for data extraction and aggregation
+- Familiarity with Jupyter Notebooks or similar environments
+
+Nice to Have
+- Experience with deep learning frameworks (PyTorch or TensorFlow)
+- Exposure to MLflow, DVC, or other experiment tracking tools
+- Experience with cloud platforms (AWS, GCP, or Azure)
+- Contributions to open source or Kaggle competition experience
+
+What We Offer
+- Competitive salary and equity
+- Mentorship from senior data scientists
+- Access to modern data infrastructure and tooling
+- Learning & development budget
