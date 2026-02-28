@@ -1,0 +1,42 @@
+Job Title: Senior iOS Developer
+Company: Apex Mobile Inc.
+Location: San Francisco, CA (Hybrid)
+Experience: 5+ years
+
+About the Role:
+We are looking for a Senior iOS Developer to join our growing mobile team. You will be responsible for architecting and building high-quality iOS applications used by millions of users worldwide.
+
+Responsibilities:
+- Design and implement new features for our core iOS applications
+- Lead code reviews and mentor junior developers
+- Collaborate with product managers, designers, and backend engineers
+- Architect scalable, maintainable, and testable code
+- Optimize app performance and ensure smooth UX
+- Publish and manage apps through the App Store
+- Stay up to date with the latest iOS SDK, Swift, and Apple platform changes
+
+Requirements:
+- 5+ years of professional iOS development experience
+- Strong proficiency in Swift; Objective-C experience is a plus
+- Deep knowledge of UIKit, SwiftUI, and Auto Layout
+- Experience with RESTful APIs and JSON parsing
+- Familiarity with MVVM, MVC, or VIPER architecture patterns
+- Strong understanding of memory management, threading, and concurrency (GCD, async/await)
+- Experience with Core Data, Realm, or other local persistence solutions
+- Proficiency with Xcode, Instruments, and debugging tools
+- Experience with CI/CD pipelines (Fastlane, GitHub Actions, Bitrise)
+- Solid understanding of App Store guidelines and submission process
+- Experience writing unit and UI tests (XCTest, XCUITest)
+
+Nice to Have:
+- Experience with Swift Package Manager and modular architecture
+- Familiarity with GraphQL or WebSockets
+- Experience with push notifications, deep linking, and background processing
+- Prior experience with AR (ARKit) or ML (Core ML) features
+- Open source contributions
+
+Compensation:
+- Base salary: $160,000 – $210,000
+- Equity package
+- Health, dental, vision benefits
+- Annual learning & development budget

@@ -1,0 +1,49 @@
+ALEX CHEN
+Senior iOS Developer
+San Francisco, CA | alex.chen@email.com | linkedin.com/in/alexchen | github.com/alexchen-ios
+
+SUMMARY
+Senior iOS Developer with 7 years of experience building and shipping consumer-grade iOS applications. Passionate about clean architecture, performance optimization, and mentoring engineers. Shipped apps with 10M+ downloads and led mobile teams at both startups and mid-size companies.
+
+EXPERIENCE
+
+Senior iOS Developer — NovaPay Inc., San Francisco, CA (2021 – Present)
+- Led iOS development for a fintech app with 4.8★ App Store rating and 3M+ active users
+- Architected a full rewrite from MVC to MVVM+Coordinator pattern, reducing crash rate by 62%
+- Implemented async/await concurrency model across the networking layer, improving responsiveness by 30%
+- Built real-time transaction feed using WebSockets and Combine framework
+- Mentored a team of 3 junior iOS developers; ran weekly code review sessions
+- Set up CI/CD pipeline with Fastlane + GitHub Actions, reducing release cycle from 2 weeks to 3 days
+- Integrated Core Data with iCloud sync for offline-first account history
+
+iOS Developer — Creatify Labs, San Jose, CA (2019 – 2021)
+- Developed and maintained a SwiftUI-based design tool app (50K+ downloads)
+- Implemented custom gesture recognizers and Canvas-based drawing engine using Core Graphics
+- Migrated legacy Objective-C modules to Swift, reducing codebase size by 40%
+- Worked closely with designers to implement pixel-perfect UI using Auto Layout and SwiftUI
+- Built push notification system with rich media support and deep linking
+
+Junior iOS Developer — Bright Apps Studio, Oakland, CA (2017 – 2019)
+- Contributed to 5 client iOS apps across health, fitness, and e-commerce verticals
+- Integrated third-party SDKs including Stripe, Firebase, and Mixpanel
+- Wrote unit tests with XCTest achieving 75% code coverage on core modules
+- Participated in App Store submission and review process for 3 apps
+
+SKILLS
+- Languages: Swift (expert), Objective-C (proficient)
+- Frameworks: UIKit, SwiftUI, Combine, Core Data, Core Location, ARKit, CoreML
+- Architecture: MVVM, MVC, VIPER, Clean Architecture
+- Networking: URLSession, Alamofire, REST, GraphQL, WebSockets
+- Tools: Xcode, Instruments, Charles Proxy, Fastlane, GitHub Actions, Bitrise
+- Testing: XCTest, XCUITest, Quick/Nimble
+- Other: Swift Package Manager, CocoaPods, Git, Agile/Scrum
+
+EDUCATION
+B.S. Computer Science — UC San Diego, 2017
+
+PROJECTS
+- OpenSwiftUI — Open source SwiftUI component library (320 GitHub stars)
+- ARDraw — Personal AR sketching app built with ARKit 5, featured in SF App Expo 2022
+
+CERTIFICATIONS
+- Apple Developer Program Member (active since 2017)
