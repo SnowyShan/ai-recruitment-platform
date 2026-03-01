@@ -1,0 +1,42 @@
+Kavitha Rajan
+kavitha.rajan@email.com | (408) 555-7823 | San Jose, CA
+linkedin.com/in/kavitharajan
+
+OBJECTIVE
+Experienced analyst with 7+ years in market research and data automation, looking to transition into a broader data and business analytics role with greater technical scope.
+
+EDUCATION
+San Jose State University — M.S. Computer Science, 2022
+Pune University — B.S. Computer Science, Pune, India
+
+PROJECTS
+
+Customer Churn Prediction — Machine Learning Project | San Jose State University
+- Built classification models on a telecom dataset (1,500 records, 32 features); achieved 83% accuracy using Random Forest with GridSearchCV hyperparameter tuning
+- Performed feature engineering, correlation analysis, and label encoding to surface key churn drivers (contract type, tenure, monthly charges)
+- Applied SHAP values to interpret model outputs and generate actionable retention recommendations
+
+WORK EXPERIENCE
+
+Epsilon Data Management | San Jose, CA                          Jan 2013 – Aug 2019
+
+Senior Research Analyst                                         Feb 2017 – Aug 2019
+- Automated research deliverables for Fortune 500 clients using Excel VBA and internal proprietary tools, cutting report turnaround time by 30%
+- Managed end-to-end production of global tracking studies across finance, retail, healthcare, and insurance verticals
+- Partnered with third-party vendors (Kantar, Ipsos, Dynata) to deliver integrated marketing research insights
+- Applied statistical methods including t-tests, Z-tests, correlation analysis, and sample weighting to large-scale survey datasets
+- Cleaned and transformed raw SPSS and CSV datasets into client-ready data views; automated PowerPoint report generation across multi-wave studies
+- Conducted QA audits on data visualizations and statistical outputs to ensure accuracy before client delivery
+
+Research Analyst                                                May 2015 – Jan 2017
+- Produced PowerPoint and Excel reports; built Excel macro workflows to automate high-volume tracking deliverables
+- Coordinated with offshore teams across time zones to meet tight delivery schedules
+- Authored training SOPs and onboarding documentation that improved team ramp-up time
+
+Associate Analyst                                               Jan 2013 – May 2015
+- Transformed raw datasets into polished client-ready reports under tight timelines
+- Developed proficiency in SPSS, Excel, and internal charting platforms through hands-on project work
+- Supported senior analysts with QA reviews and internal documentation
+
+SKILLS
+Data Analysis | Market Research Reporting | Excel Automation (VBA, Macros) | PowerPoint Automation | SPSS | Python (pandas, NumPy, scikit-learn) | SQL (basic) | Google Sheets | Data Cleaning & Transformation | Statistical Testing (t-test, Z-test, correlation) | Report Quality Assurance | Cross-functional Collaboration | Client Communication | Workflow Optimization

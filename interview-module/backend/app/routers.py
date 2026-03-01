@@ -121,26 +121,78 @@ def submit_answer(session_id: str, req: AnswerSubmit):
     conn.close()
     return {"question_index": req.question_index, "evaluation": evaluation}
 
+class CompleteRequest(BaseModel):
+    full_transcript: Optional[str] = None
+    questions: Optional[list] = None
+
 @session_router.post("/session/{session_id}/complete")
-def complete_session(session_id: str):
+def complete_session(session_id: str, req: CompleteRequest = CompleteRequest()):
     conn = get_conn()
     row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Session not found")
-    questions = json.loads(row["questions"])
-    answers = json.loads(row["answers"])
-    qa_pairs = []
-    for i, q in enumerate(questions):
-        ans = answers.get(str(i), {})
-        qa_pairs.append({
-            "question": q["question"],
-            "answer": ans.get("answer", "(no answer)"),
-            "score": ans.get("score", 0),
-            "feedback": ans.get("feedback", "Not answered"),
-        })
-    report = ai.generate_report(row["job_description"], row["resume_text"], qa_pairs)
+    questions = req.questions or json.loads(row["questions"])
+    full_transcript = req.full_transcript or ""
+    # Fetch evaluation prompt from settings
+    settings_row = conn.execute("SELECT value FROM settings WHERE key = 'evaluation_prompt'").fetchone()
+    evaluation_prompt = settings_row["value"] if settings_row else ""
+    report = ai.generate_report_from_transcript(row["job_description"], row["resume_text"], questions, full_transcript, evaluation_prompt)
     conn.execute("UPDATE sessions SET status = 'completed', report = ?, completed_at = ? WHERE id = ?",
         (json.dumps(report), datetime.utcnow().isoformat(), session_id))
     conn.commit()
     conn.close()
     return report
+
+# ── Test Data ──────────────────────────────────────────────────
+
+import os, random
+
+testdata_router = APIRouter(prefix="/api/interview", tags=["TestData"])
+
+TESTDATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "testData")
+
+@testdata_router.get("/testdata/random")
+def get_random_testdata():
+    base = os.path.abspath(TESTDATA_DIR)
+    folders = [f for f in os.listdir(base) if os.path.isdir(os.path.join(base, f))]
+    if not folders:
+        raise HTTPException(status_code=404, detail="No test data folders found")
+    chosen = random.choice(folders)
+    folder_path = os.path.join(base, chosen)
+    jd_path = os.path.join(folder_path, "jd.txt")
+    resume_path = os.path.join(folder_path, "resume.txt")
+    if not os.path.exists(jd_path) or not os.path.exists(resume_path):
+        raise HTTPException(status_code=404, detail=f"Missing jd.txt or resume.txt in {chosen}")
+    return {
+        "folder": chosen,
+        "job_description": open(jd_path).read(),
+        "resume": open(resume_path).read(),
+    }
+
+
+# ── Settings ───────────────────────────────────────────────────
+
+settings_router = APIRouter(prefix="/api/interview", tags=["Settings"])
+
+class SettingsResponse(BaseModel):
+    evaluation_prompt: str
+
+class SettingsUpdate(BaseModel):
+    evaluation_prompt: str
+
+@settings_router.get("/settings")
+def get_settings():
+    conn = get_conn()
+    row = conn.execute("SELECT value FROM settings WHERE key = 'evaluation_prompt'").fetchone()
+    conn.close()
+    return SettingsResponse(evaluation_prompt=row["value"] if row else "")
+
+@settings_router.put("/settings")
+def update_settings(req: SettingsUpdate):
+    conn = get_conn()
+    conn.execute("""INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
+        ("evaluation_prompt", req.evaluation_prompt, datetime.utcnow().isoformat()))
+    conn.commit()
+    conn.close()
+    return SettingsResponse(evaluation_prompt=req.evaluation_prompt)

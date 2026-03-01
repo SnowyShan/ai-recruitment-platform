@@ -1,8 +1,8 @@
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useState, useEffect } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
 import axios from 'axios'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8001'
+const API = import.meta.env.VITE_API_URL || ''
 
 const DIFFICULTY_LABELS = ['', 'Intern', 'Junior', 'Mid-Level', 'Senior', 'Staff / Principal']
 const SENIORITY_OPTIONS = ['junior', 'mid', 'senior', 'staff']
@@ -18,7 +18,23 @@ export default function Setup() {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [hardcodedQuestions, setHardcodedQuestions] = useState('')
   const [loading, setLoading] = useState(false)
+  const [prefilling, setPrefilling] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    const prefill = async () => {
+      setPrefilling(true)
+      try {
+        const { data } = await axios.get(`${API}/api/interview/testdata/random`)
+        setJobDescription(data.job_description)
+        setResumeText(data.resume)
+      } catch (e) {
+        console.warn('Could not load test data:', e)
+      }
+      setPrefilling(false)
+    }
+    prefill()
+  }, [])
 
   const start = async () => {
     if (!jobDescription.trim() || !resumeText.trim()) {
@@ -53,7 +69,7 @@ export default function Setup() {
       <div className="w-full max-w-2xl space-y-6">
         <div className="text-center">
           <h1 className="text-4xl font-bold text-white mb-2">AI Interview</h1>
-          <p className="text-gray-400">Paste the job description and resume to begin</p>
+          <p className="text-gray-400">{prefilling ? 'Loading test data...' : 'Pre-filled with test data — edit or start directly'}</p>
         </div>
 
         <div className="bg-gray-900 rounded-2xl p-6 space-y-5 border border-gray-800">
@@ -112,6 +128,9 @@ export default function Setup() {
             {loading ? 'Generating questions...' : 'Start Interview →'}
           </button>
         </div>
+      </div>
+      <div className="text-center mt-6">
+        <Link to="/settings" className="text-gray-600 hover:text-gray-400 text-xs transition-colors">⚙ Evaluation Settings</Link>
       </div>
     </div>
   )

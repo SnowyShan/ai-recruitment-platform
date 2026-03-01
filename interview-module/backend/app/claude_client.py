@@ -23,7 +23,7 @@ def generate_questions(resume_text: str, job_description: str, difficulty: int, 
         return _mock_questions(num_questions)
 
     level = DIFFICULTY_LABELS.get(difficulty, "mid-level")
-    prompt = f"""You are a technical interviewer. Generate {num_questions} interview questions for a candidate.
+    prompt = f"""You are a technical interviewer assembling a question set for a structured interview.
 
 Job Description:
 {job_description}
@@ -33,20 +33,34 @@ Candidate Resume:
 
 Difficulty level: {level} (difficulty {difficulty}/5)
 
-Generate questions appropriate for this difficulty level. For difficulty 1-2, focus on fundamentals. For 3, balanced technical depth. For 4-5, focus on system design, trade-offs, and deep expertise.
+Generate exactly {num_questions} interview questions following these rules:
+1. Each question must cover a DISTINCT concept or skill area — no two questions should overlap in the core concept being tested. If memory management is tested, do not test it again from a different angle.
+2. Assign each question a short topic tag (e.g. "Memory Management", "Concurrency", "Architecture").
+3. Before finalising the list, review it and remove any question whose core concept is already covered by another question in the list. Replace it with a question on a different topic.
+4. For difficulty 1-2, focus on fundamentals. For 3, balanced technical depth. For 4-5, focus on system design, trade-offs, and deep expertise.
+5. Order questions from foundational to advanced.
 
 Return ONLY a JSON array like:
 [{{"question": "...", "topic": "...", "expected_depth": "..."}}]"""
 
     resp = client.messages.create(
-        model="claude-opus-4-5",
+        model="claude-sonnet-4-5-20250929",
         max_tokens=2000,
         messages=[{"role": "user", "content": prompt}]
     )
     text = resp.content[0].text.strip()
-    # Extract JSON
     start, end = text.find("["), text.rfind("]") + 1
-    return json.loads(text[start:end])
+    questions = json.loads(text[start:end])
+
+    # Post-process: deduplicate by topic as a safety net
+    seen_topics = set()
+    deduped = []
+    for q in questions:
+        topic_key = q.get("topic", "").lower().strip()
+        if topic_key not in seen_topics:
+            seen_topics.add(topic_key)
+            deduped.append(q)
+    return deduped[:num_questions]
 
 def evaluate_answer(question: str, answer: str, job_description: str, seniority_bar: str, hardcoded_answer: Optional[str]) -> dict:
     client = _client()
@@ -76,7 +90,7 @@ Evaluate strictly. Return ONLY JSON:
 }}"""
 
     resp = client.messages.create(
-        model="claude-haiku-3-5",
+        model="claude-haiku-4-5-20251001",
         max_tokens=800,
         messages=[{"role": "user", "content": prompt}]
     )
@@ -120,7 +134,7 @@ Write a comprehensive hiring report. Return ONLY JSON:
 }}"""
 
     resp = client.messages.create(
-        model="claude-opus-4-5",
+        model="claude-sonnet-4-5-20250929",
         max_tokens=3000,
         messages=[{"role": "user", "content": prompt}]
     )
@@ -148,3 +162,58 @@ def _mock_evaluation() -> dict:
 
 def _mock_report() -> dict:
     return {"overall_score": 72, "pass": True, "summary": "Mock report — add API key for real analysis.", "strengths": ["Communicates clearly"], "weaknesses": ["Needs more depth"], "hiring_recommendation": "Consider for next round.", "per_question": []}
+
+
+def generate_report_from_transcript(job_description: str, resume_text: str, questions: list, full_transcript: str, evaluation_prompt: str = "") -> dict:
+    client = _client()
+    if not client:
+        return _mock_report()
+
+    questions_list = "\n".join([f"Q{i+1}: {q['question']}" for i, q in enumerate(questions)])
+
+    guidelines = evaluation_prompt.strip() if evaluation_prompt.strip() else "Evaluate answers fairly based on technical correctness and depth. For skipped questions, score 0."
+
+    prompt = f"""You are a senior technical interviewer writing a hiring evaluation report.
+
+Job Description:
+{job_description}
+
+Candidate Resume:
+{resume_text}
+
+Interview Questions:
+{questions_list}
+
+Full Interview Transcript (questions marked with [Q1:], [Q2:] etc, [SKIPPED] means candidate skipped):
+{full_transcript}
+
+Evaluation guidelines:
+{guidelines}
+
+Return ONLY valid JSON in this exact format:
+{{
+  "overall_score": <0-100>,
+  "pass": <true/false>,
+  "summary": "...",
+  "strengths": ["...", "..."],
+  "weaknesses": ["...", "..."],
+  "hiring_recommendation": "...",
+  "per_question": [
+    {{
+      "question": "...",
+      "score": <0-100>,
+      "feedback": "...",
+      "what_was_good": "...",
+      "what_was_missing": "..."
+    }}
+  ]
+}}"""
+
+    resp = client.messages.create(
+        model="claude-sonnet-4-5-20250929",
+        max_tokens=3000,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    text = resp.content[0].text.strip()
+    start, end = text.find("{"), text.rfind("}") + 1
+    return json.loads(text[start:end])

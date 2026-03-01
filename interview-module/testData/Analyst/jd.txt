@@ -1,0 +1,31 @@
+Job Title: Business / Data Analyst
+Department: Strategy & Analytics
+Location: San Jose, CA (Hybrid)
+Employment Type: Full-Time
+
+About the Role
+We are looking for a detail-oriented and analytically driven Business Analyst to join our Strategy & Analytics team. You will work with stakeholders across marketing, finance, and operations to transform data into insights that inform business decisions.
+
+This role is a great fit for someone with a strong background in research reporting and data automation who is looking to grow their technical skills in modern data tooling.
+
+Responsibilities
+- Gather, clean, and analyze data from multiple sources to answer business questions
+- Build and maintain automated reports and dashboards for internal stakeholders
+- Apply statistical methods to validate findings and surface actionable insights
+- Collaborate with cross-functional teams to define KPIs and measurement frameworks
+- Document processes, methodologies, and data definitions clearly
+- Present findings to both technical and non-technical audiences
+
+Requirements
+- 4+ years of experience in a data, research, or analytics role
+- Strong proficiency in Excel (including VBA/macros) and PowerPoint
+- Experience with statistical analysis methods: t-tests, correlation, regression
+- Familiarity with SPSS, SQL, or similar data tools
+- Excellent communication and stakeholder management skills
+- Bachelor's degree in a quantitative field (Computer Science, Statistics, Business, or related)
+
+Nice to Have
+- Experience with Python (pandas, NumPy) or R for data analysis
+- Exposure to BI tools (Tableau, Power BI, Looker)
+- Graduate degree in a technical field
+- Experience in market research or survey analytics
