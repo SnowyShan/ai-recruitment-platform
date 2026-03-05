@@ -1,5 +1,5 @@
 # TalentBridge — Interview Module TODO
-*Last updated: March 5, 2026 (afternoon)*
+*Last updated: March 5, 2026 (evening)*
 *Use this file to come up to speed on the project before making changes.*
 
 ---
@@ -54,7 +54,9 @@ cd interview-module/frontend && npm run dev -- --port 5174
 - [x] **Task 4:** Auto-terminate — Countdown timer. When time expires, 2-minute wrap-up window given. After wrap-up, session auto-completes.
 - [x] **Task 5:** Report generation — Full transcript + questions sent to Claude in one batch call at session end. Detailed report: per-question scores, overall pass/fail, strengths, weaknesses. Report POSTed back to TalentBridge and stored. Recruiter can view via "View Report" in JobDetail.
 - [x] **Task 6 Phase 1:** Browser TTS (speechSynthesis) — questions read aloud via `window.speechSynthesis`, mute toggle, replay button, Chrome keepalive fix, Safari restart bug fixed (keepalive disabled on non-Chrome), auto-record starts after speech ends.
-- [x] **Safari/iOS compatibility** — TDZ crash fixed (declaration reorder), transcript capture race condition fixed (`questionAnswersRef` updated live on every `onresult`), production build via `npx serve` instead of vite dev server.
+- [x] **Task 6 Phase 2:** OpenAI TTS (`tts-1`, voice `nova`) — backend `/api/interview/tts` endpoint streams audio/mpeg on demand per question. Frontend plays `<audio>` element; falls back to speechSynthesis on error. Generation counter prevents stale in-flight responses from playing after user advances. Pre-interview instructions screen handles iOS autoplay gate — Q0 audio pre-fetched while user reads instructions, plays instantly on "Start Interview" tap.
+- [x] **Pre-interview instructions screen** — shows duration, question count, usage tips. "Allow Microphone & Continue" requests mic permission. "Start Interview" tap is the iOS user gesture that unlocks audio autoplay. No "Tap to Begin" needed inside the interview itself.
+- [x] **Safari/iOS compatibility** — TDZ crash fixed (declaration reorder), transcript capture race condition fixed (`questionAnswersRef` updated live on every `onresult`), production build via `npx serve` instead of vite dev server, mic permission requested upfront.
 
 ### Integration — Complete
 
@@ -92,28 +94,36 @@ cd interview-module/frontend && npm run dev -- --port 5174
 
 **Phase 1 (browser speechSynthesis) — DONE ✅**
 
-**Next: Phase 2 — OpenAI TTS, generated on the fly at session creation**
+**Next: Phase 2 — OpenAI TTS, on-demand per question**
 
-Generate audio for all questions (both hardcoded and behavioral) at session creation time. Simple and consistent — no caching logic, no pre-generation step. Optimize to pre-generated/cached audio later once this is working well.
+Generate audio for one question at a time, only when the candidate navigates to it. No upfront generation, no file storage — backend streams audio directly back to the frontend.
+
+**Flow:**
+```
+Question N displayed
+  → frontend POST /api/interview/tts { text: voice_text }
+  → backend calls OpenAI tts-1, streams audio/mpeg back
+  → frontend plays blob URL
+  → audio.onended → startRecording()
+  → user presses Next → same flow for question N+1
+  → if TTS fails → fall back to speechSynthesis
+```
 
 **What needs doing:**
 - Add `OPENAI_API_KEY` to interview module backend `.env`
 - Install `openai` in the interview module backend venv
-- Add `generate_audio(text, session_id, idx)` in backend — calls `tts-1`, saves MP3 to `static/audio/session_{id}/q_{idx}.mp3`
-- Mount `/static` in FastAPI (`app.mount`)
-- In session creation endpoint: after Claude generates questions, call `generate_audio()` for each, attach `voice_audio_url` to each question
-- Frontend: if `voice_audio_url` present → play `<audio>` element; on ended → `startRecording()`. Fall back to `speechSynthesis` if URL absent or fails.
+- Add `POST /api/interview/tts` endpoint — takes `{ text }`, calls OpenAI `tts-1`, returns `audio/mpeg` stream. No file saved.
+- Frontend: on each question change, call `/tts`, create blob URL, play `<audio>`. `onended` → `startRecording()`. Fall back to `speechSynthesis` on error.
 
-**Cost:** ~$0.015 per 1K characters (tts-1). Typical question ~100 chars → ~$0.0015/question → ~$0.01–0.015 per session. Acceptable for now.
+**Cost:** ~$0.015 per 1K characters (tts-1). Typical question ~100 chars → ~$0.0015/question. Negligible.
 
 **Files to edit:**
 1. `interview-module/backend/.env` — add `OPENAI_API_KEY`
 2. `interview-module/backend/requirements.txt` — add `openai`
-3. `interview-module/backend/app/routers.py` — session creation, generate audio after questions
-4. `interview-module/backend/app/main.py` — mount `/static`
-5. `interview-module/frontend/src/pages/Interview.jsx` — play `<audio>` when `voice_audio_url` exists
+3. `interview-module/backend/app/routers.py` — add `/tts` endpoint
+4. `interview-module/frontend/src/pages/Interview.jsx` — call `/tts` on question change, play audio
 
-**Future optimization (Phase 3):** Pre-generate audio for hardcoded questions once at question-save time; reuse across all candidates. Only generate at session time for behavioral questions.
+**Future optimization (Phase 3):** Cache audio per `voice_text` hash so the same question isn't re-generated across candidates.
 
 ---
 
@@ -230,8 +240,6 @@ interview-module/
 
 ## Next Task to Build
 
-**Task 6 Phase 2: OpenAI TTS — on-the-fly audio at session creation**
+**Task 7: Natural Conversation — small talk intro + transition phrases between questions**
 
-Blocked on: `OPENAI_API_KEY` from Indrajit.
-
-See implementation details in the Task 6 section above.
+See Task 7 section below for implementation plan.

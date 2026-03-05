@@ -1,12 +1,15 @@
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
-import uuid, json, os, httpx
+import uuid, json, os, httpx, io
 from datetime import datetime
 from .database import get_conn
 from . import claude_client as ai
+from openai import OpenAI
 
 TALENTBRIDGE_API_URL = os.getenv("TALENTBRIDGE_API_URL", "http://localhost:8000")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 
 def _notify_talentbridge(session_id: str, report: dict):
@@ -72,6 +75,30 @@ def generate_report(req: ReportRequest):
     pairs = [p.model_dump() for p in req.qa_pairs]
     report = ai.generate_report(req.job_description, req.resume_text, pairs)
     return report
+
+# ── TTS ────────────────────────────────────────────────────────
+
+tts_router = APIRouter(prefix="/api/interview", tags=["TTS"])
+
+class TTSRequest(BaseModel):
+    text: str
+    voice: str = "nova"  # nova sounds natural and professional
+
+@tts_router.post("/tts")
+def synthesize_speech(req: TTSRequest):
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="TTS not configured")
+    if not req.text.strip():
+        raise HTTPException(status_code=400, detail="No text provided")
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    response = client.audio.speech.create(
+        model="tts-1",
+        voice=req.voice,
+        input=req.text.strip(),
+    )
+    audio_bytes = response.read()
+    return StreamingResponse(io.BytesIO(audio_bytes), media_type="audio/mpeg")
+
 
 # ── Sessions ───────────────────────────────────────────────────
 

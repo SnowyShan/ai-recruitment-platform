@@ -85,6 +85,39 @@ export default function Interview() {
     }
   }, [sessionId])
 
+    // Pre-interview intro phase:
+  //   'intro'    → instructions screen, mic not yet requested
+  //   'granting' → getUserMedia in flight, spinner on button
+  //   'ready'    → mic granted/denied, "Start Interview" button shown, Q0 audio pre-fetching
+  //   'started'  → interview running
+  const [introPhase, setIntroPhase] = useState('intro')
+  const prefetchedAudioRef = useRef(null)
+
+  const micReady  = introPhase === 'started'
+  const started   = introPhase === 'started'
+
+  const handleGrantMic = async () => {
+    setIntroPhase('granting')
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      stream.getTracks().forEach(t => t.stop())
+    } catch (_) {}  // denied — Web Speech API fallback will handle it
+    setIntroPhase('ready')
+  }
+
+  // Pre-fetch Q0 audio while user reads instructions (after mic granted)
+  useEffect(() => {
+    if (introPhase !== 'ready' || questions.length === 0) return
+    const text = questions[0]?.voice_text || questions[0]?.question || ''
+    if (!text) return
+    axios.post(`${API}/api/interview/tts`, { text }, { responseType: 'blob' })
+      .then(res => { prefetchedAudioRef.current = URL.createObjectURL(res.data) })
+      .catch(() => {})
+  }, [introPhase, questions])
+
+  // "Start Interview" tap — this IS the user gesture that unlocks iOS audio autoplay
+  const handleStart = () => setIntroPhase('started')
+
   // Validate invite token if present
   useEffect(() => {
     const token = tokenRef.current
@@ -125,88 +158,100 @@ export default function Interview() {
 
   // ── TTS ──────────────────────────────────────────────────────────────────────
 
+  const audioRef = useRef(null)   // current playing HTMLAudioElement
+  const ttsGenRef = useRef(0)     // incremented on every cancel — stale axios responses self-discard
+
   const cancelSpeech = () => {
+    ttsGenRef.current++            // invalidate any in-flight TTS requests
     ttsCancelRef.current = true
     clearInterval(ttsKeepaliveRef.current)
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.src = ''
+      audioRef.current = null
+    }
     window.speechSynthesis?.cancel()
     setIsSpeaking(false)
   }
 
   const speakThenRecord = useCallback((text) => {
     cancelSpeech()
-    if (!ttsEnabledRef.current || !window.speechSynthesis) {
+    if (!ttsEnabledRef.current) {
       startRecording()
       return
     }
 
     ttsCancelRef.current = false
-    setIsSpeaking(true)
+    const gen = ++ttsGenRef.current  // capture this call's generation
 
-    // Chrome bug: voices may not be loaded yet on first call
-    const doSpeak = () => {
-      if (ttsCancelRef.current) return
-      const utterance = new SpeechSynthesisUtterance(text)
-      utterance.rate = 0.92
-      utterance.pitch = 1
-      utterance.volume = 1
-      const voice = getBestVoice()
-      if (voice) utterance.voice = voice
-
-      utterance.onend = () => {
-        clearInterval(ttsKeepaliveRef.current)
+    // Use pre-fetched audio if available (Q0 is pre-fetched during instructions screen)
+    const playBlob = (blobUrl) => {
+      if (ttsGenRef.current !== gen) { URL.revokeObjectURL(blobUrl); return }  // stale — discard
+      const audio = new Audio(blobUrl)
+      audioRef.current = audio
+      audio.onended = () => {
+        URL.revokeObjectURL(blobUrl)
+        audioRef.current = null
         setIsSpeaking(false)
-        if (!ttsCancelRef.current) startRecording()
+        if (ttsGenRef.current === gen) startRecording()
       }
-      utterance.onerror = () => {
-        clearInterval(ttsKeepaliveRef.current)
+      audio.onerror = () => {
+        URL.revokeObjectURL(blobUrl)
+        audioRef.current = null
         setIsSpeaking(false)
-        if (!ttsCancelRef.current) startRecording()
+        if (ttsGenRef.current === gen) startRecording()
       }
-
-      window.speechSynthesis.speak(utterance)
-
-      // Chrome-only keepalive: speechSynthesis silently stops after ~15s on Chrome.
-      // Do NOT apply on Safari/iOS — pause()+resume() restarts the utterance there.
-      const isChrome = /Chrome/.test(navigator.userAgent) && !/Edg|OPR|Safari/.test(navigator.userAgent)
-      if (isChrome) {
-        ttsKeepaliveRef.current = setInterval(() => {
-          if (window.speechSynthesis.speaking) {
-            window.speechSynthesis.pause()
-            window.speechSynthesis.resume()
-          }
-        }, 10000)
-      }
+      audio.play()
+        .then(() => { if (ttsGenRef.current === gen) setIsSpeaking(true) })
+        .catch(() => {
+          URL.revokeObjectURL(blobUrl)
+          audioRef.current = null
+          setIsSpeaking(false)
+          if (ttsGenRef.current === gen) startRecording()
+        })
     }
 
-    // Voices may not be loaded yet (Chrome loads async)
-    if (window.speechSynthesis.getVoices().length > 0) {
-      doSpeak()
-    } else {
-      window.speechSynthesis.onvoiceschanged = () => {
-        window.speechSynthesis.onvoiceschanged = null
-        doSpeak()
-      }
-      // Fallback if onvoiceschanged never fires
-      setTimeout(doSpeak, 500)
+    if (prefetchedAudioRef.current) {
+      const blobUrl = prefetchedAudioRef.current
+      prefetchedAudioRef.current = null
+      playBlob(blobUrl)
+      return
     }
+
+    // Fetch TTS audio from backend
+    axios.post(`${API}/api/interview/tts`, { text }, { responseType: 'blob' })
+      .then(res => {
+        if (ttsGenRef.current !== gen) return  // stale — discard
+        playBlob(URL.createObjectURL(res.data))
+      })
+      .catch(() => {
+        // OpenAI TTS failed — fall back to browser speechSynthesis
+        if (ttsCancelRef.current) return
+        if (!window.speechSynthesis) {
+          setIsSpeaking(false)
+          startRecording()
+          return
+        }
+        const utterance = new SpeechSynthesisUtterance(text)
+        utterance.rate = 0.92
+        const voice = getBestVoice()
+        if (voice) utterance.voice = voice
+        utterance.onend = () => { setIsSpeaking(false); if (!ttsCancelRef.current) startRecording() }
+        utterance.onerror = () => { setIsSpeaking(false); if (!ttsCancelRef.current) startRecording() }
+        window.speechSynthesis.speak(utterance)
+      })
   }, [])
 
+  // Speak questions — gated on both micReady and started (user tapped "Tap to Begin").
   useEffect(() => {
-    if (questionsRef.current.length === 0) return
+    if (!micReady || !started) return
+    if (questions.length === 0) return
     transcriptRef.current = ''
     setTranscript('')
-    const q = questionsRef.current[currentIndex]
+    const q = questions[currentIndex]
+    if (!q) return
     speakThenRecord(q?.voice_text || q?.question || '')
-  }, [currentIndex, speakThenRecord])
-
-  useEffect(() => {
-    if (questions.length > 0 && currentIndex === 0) {
-      transcriptRef.current = ''
-      setTranscript('')
-      const q = questions[0]
-      speakThenRecord(q?.voice_text || q?.question || '')
-    }
-  }, [questions.length, speakThenRecord])
+  }, [currentIndex, questions, speakThenRecord, micReady, started])
 
   const replayQuestion = () => {
     const q = questionsRef.current[currentIndexRef.current]
@@ -360,6 +405,65 @@ export default function Interview() {
       <div className="spinner" />
     </div>
   )
+
+  // Pre-interview instructions screen
+  if (introPhase !== 'started') {
+    const numQuestions = questions.length || '–'
+    const minutes = Math.round((state?.timeLimit || 45))
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 max-w-md w-full p-8 flex flex-col gap-6">
+          <div>
+            <p className="text-blue-600 text-sm font-medium mb-1">AI Screening Interview</p>
+            <h1 className="text-2xl font-semibold text-slate-800">Before you begin</h1>
+          </div>
+
+          <ul className="flex flex-col gap-4 text-slate-600 text-sm">
+            <li className="flex gap-3">
+              <span className="text-2xl leading-none">🕐</span>
+              <span><strong className="text-slate-800">{minutes} minutes total.</strong> A 2-minute wrap-up is given when time runs out.</span>
+            </li>
+            <li className="flex gap-3">
+              <span className="text-2xl leading-none">💬</span>
+              <span><strong className="text-slate-800">{numQuestions} questions.</strong> Each question is read aloud. Answer by speaking — your response is transcribed automatically.</span>
+            </li>
+            <li className="flex gap-3">
+              <span className="text-2xl leading-none">⏭</span>
+              <span>Tap <strong className="text-slate-800">Next</strong> when you're done with an answer, or <strong className="text-slate-800">Skip</strong> to move on. You can replay a question at any time.</span>
+            </li>
+            <li className="flex gap-3">
+              <span className="text-2xl leading-none">🎙</span>
+              <span>Find a <strong className="text-slate-800">quiet place</strong> and speak clearly. The interview will ask for microphone access.</span>
+            </li>
+          </ul>
+
+          {introPhase === 'intro' && (
+            <button
+              onClick={handleGrantMic}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-4 rounded-xl text-base shadow-sm active:scale-95 transition-transform"
+            >
+              Allow Microphone & Continue
+            </button>
+          )}
+
+          {introPhase === 'granting' && (
+            <button disabled className="bg-blue-400 text-white font-semibold px-6 py-4 rounded-xl text-base opacity-70 cursor-wait">
+              Requesting access…
+            </button>
+          )}
+
+          {introPhase === 'ready' && (
+            <button
+              onClick={handleStart}
+              className="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-4 rounded-xl text-base shadow-sm active:scale-95 transition-transform"
+            >
+              {prefetchedAudioRef.current ? 'Start Interview →' : 'Start Interview →'}
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   if (finishing) return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-4 text-slate-500">
