@@ -27,3 +27,26 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def run_migrations(engine):
+    """Add new columns if they don't exist (safe to run on existing DBs)."""
+    from sqlalchemy import text
+    migrations = [
+        "ALTER TABLE screenings ADD COLUMN interview_session_id TEXT",
+        "ALTER TABLE screenings ADD COLUMN invite_token TEXT",
+        "ALTER TABLE screenings ADD COLUMN invite_sent_at DATETIME",
+        "ALTER TABLE screenings ADD COLUMN invite_expires_at DATETIME",
+        "ALTER TABLE screenings ADD COLUMN invite_used BOOLEAN DEFAULT 0",
+        "ALTER TABLE jobs ADD COLUMN interview_time_limit INTEGER DEFAULT 45",
+        "ALTER TABLE jobs ADD COLUMN interview_num_questions INTEGER DEFAULT 8",
+        "ALTER TABLE jobs ADD COLUMN interview_difficulty INTEGER DEFAULT 3",
+        "ALTER TABLE jobs ADD COLUMN interview_seniority TEXT DEFAULT \'mid\'",
+    ]
+    with engine.connect() as conn:
+        for sql in migrations:
+            try:
+                conn.execute(text(sql))
+                conn.commit()
+            except Exception:
+                pass  # Column already exists
+

@@ -2,10 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from typing import Optional
+from datetime import datetime, timedelta
 from .. import models
 from ..database import get_db
 from ..ai import extract_text_from_pdf, extract_text_from_docx, analyze_resume
-import json
+from ..email_utils import send_screening_invite
+from .screening import _create_interview_session, INVITE_EXPIRY_HOURS
+import json, uuid
 
 router = APIRouter(prefix="/api/public", tags=["Public"])
 
@@ -207,14 +210,45 @@ async def public_apply(
                 ).first()
 
                 if not existing_screening:
+                    _job = application.job
+                    job_desc = _job.description or "" if _job else ""
+                    resume_text = candidate.resume_text or ""
+                    session_id = _create_interview_session(
+                        job_description=job_desc,
+                        resume_text=resume_text,
+                        difficulty=_job.interview_difficulty or 3 if _job else 3,
+                        seniority_bar=_job.interview_seniority or "mid" if _job else "mid",
+                        time_limit=_job.interview_time_limit or 45 if _job else 45,
+                        num_questions=_job.interview_num_questions or 8 if _job else 8,
+                    )
+                    invite_token = str(uuid.uuid4())
+                    now = datetime.utcnow()
+
                     screening = models.Screening(
                         application_id=application.id,
                         status="scheduled",
                         source="auto",
+                        interview_session_id=session_id,
+                        invite_token=invite_token,
+                        invite_sent_at=now,
+                        invite_expires_at=now + timedelta(hours=INVITE_EXPIRY_HOURS),
+                        invite_used=False,
                     )
                     db.add(screening)
                     application.status = "screening"
                     db.commit()
+
+                    # Load relationships needed for email
+                    db.refresh(application)
+                    send_screening_invite(
+                        candidate_name=candidate.full_name,
+                        candidate_email=candidate.email,
+                        job_title=application.job.title if application.job else "the role",
+                        company_name="TalentBridge",
+                        session_id=session_id or "pending",
+                        invite_token=invite_token,
+                        expires_hours=INVITE_EXPIRY_HOURS,
+                    )
 
     log_activity(db, None, "public_application_submitted", "application", application.id)
 

@@ -1,10 +1,24 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
-import uuid, json
+import uuid, json, os, httpx
 from datetime import datetime
 from .database import get_conn
 from . import claude_client as ai
+
+TALENTBRIDGE_API_URL = os.getenv("TALENTBRIDGE_API_URL", "http://localhost:8000")
+
+
+def _notify_talentbridge(session_id: str, report: dict):
+    """Post interview results back to TalentBridge."""
+    try:
+        httpx.post(
+            f"{TALENTBRIDGE_API_URL}/api/screenings/complete-from-interview",
+            json={"interview_session_id": session_id, **report},
+            timeout=10.0,
+        )
+    except Exception as e:
+        print(f"[TALENTBRIDGE CALLBACK] Failed: {e}")
 
 # ── Questions ──────────────────────────────────────────────────
 
@@ -133,7 +147,6 @@ def complete_session(session_id: str, req: CompleteRequest = CompleteRequest()):
         raise HTTPException(status_code=404, detail="Session not found")
     questions = req.questions or json.loads(row["questions"])
     full_transcript = req.full_transcript or ""
-    # Fetch evaluation prompt from settings
     settings_row = conn.execute("SELECT value FROM settings WHERE key = 'evaluation_prompt'").fetchone()
     evaluation_prompt = settings_row["value"] if settings_row else ""
     report = ai.generate_report_from_transcript(row["job_description"], row["resume_text"], questions, full_transcript, evaluation_prompt)
@@ -141,6 +154,8 @@ def complete_session(session_id: str, req: CompleteRequest = CompleteRequest()):
         (json.dumps(report), datetime.utcnow().isoformat(), session_id))
     conn.commit()
     conn.close()
+    # Notify TalentBridge
+    _notify_talentbridge(session_id, report)
     return report
 
 # ── Test Data ──────────────────────────────────────────────────
@@ -151,20 +166,25 @@ testdata_router = APIRouter(prefix="/api/interview", tags=["TestData"])
 
 TESTDATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "testData")
 
-@testdata_router.get("/testdata/random")
-def get_random_testdata():
+@testdata_router.get("/testdata")
+def list_testdata():
+    """List available test data folders."""
     base = os.path.abspath(TESTDATA_DIR)
-    folders = [f for f in os.listdir(base) if os.path.isdir(os.path.join(base, f))]
-    if not folders:
-        raise HTTPException(status_code=404, detail="No test data folders found")
-    chosen = random.choice(folders)
-    folder_path = os.path.join(base, chosen)
+    folders = sorted([f for f in os.listdir(base) if os.path.isdir(os.path.join(base, f))])
+    return {"folders": folders}
+
+@testdata_router.get("/testdata/{folder}")
+def get_testdata(folder: str):
+    base = os.path.abspath(TESTDATA_DIR)
+    folder_path = os.path.join(base, folder)
+    if not os.path.isdir(folder_path):
+        raise HTTPException(status_code=404, detail=f"Test data folder '{folder}' not found")
     jd_path = os.path.join(folder_path, "jd.txt")
     resume_path = os.path.join(folder_path, "resume.txt")
     if not os.path.exists(jd_path) or not os.path.exists(resume_path):
-        raise HTTPException(status_code=404, detail=f"Missing jd.txt or resume.txt in {chosen}")
+        raise HTTPException(status_code=404, detail=f"Missing jd.txt or resume.txt in {folder}")
     return {
-        "folder": chosen,
+        "folder": folder,
         "job_description": open(jd_path).read(),
         "resume": open(resume_path).read(),
     }

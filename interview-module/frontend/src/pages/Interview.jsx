@@ -1,8 +1,35 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useLocation, useNavigate } from 'react-router-dom'
+import { useParams, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
 
+// ── TTS helpers ───────────────────────────────────────────────────────────────
+
+const TTS_STORAGE_KEY = 'interview_tts_enabled'
+
+function getTTSEnabled() {
+  try { return localStorage.getItem(TTS_STORAGE_KEY) !== 'false' } catch { return true }
+}
+
+function setTTSEnabled(val) {
+  try { localStorage.setItem(TTS_STORAGE_KEY, val ? 'true' : 'false') } catch {}
+}
+
+// Pick the best available voice — prefer natural-sounding macOS/iOS voices
+function getBestVoice() {
+  const voices = window.speechSynthesis?.getVoices() || []
+  const preferred = [
+    'Samantha', 'Alex', 'Karen', 'Daniel',   // macOS neural voices
+    'Google US English', 'Microsoft Aria',     // Chrome/Windows
+  ]
+  for (const name of preferred) {
+    const v = voices.find(v => v.name.includes(name))
+    if (v) return v
+  }
+  return voices.find(v => v.lang.startsWith('en')) || voices[0] || null
+}
+
 const API = import.meta.env.VITE_API_URL || ''
+const MAIN_API = import.meta.env.VITE_MAIN_API_URL || ''
 
 export default function Interview() {
   const { sessionId } = useParams()
@@ -14,23 +41,40 @@ export default function Interview() {
   const [transcript, setTranscript] = useState('')
   const [isRecording, setIsRecording] = useState(false)
   const [timeLeft, setTimeLeft] = useState((state?.timeLimit || 45) * 60)
+  const [finishing, setFinishing] = useState(false)
   const [isWrapUp, setIsWrapUp] = useState(false)
   const isWrapUpRef = useRef(false)
-  const [finishing, setFinishing] = useState(false)
+  const [finishing2, setFinishing2] = useState(false)
+
+  const [searchParams] = useSearchParams()
+  const [tokenError, setTokenError] = useState(null)
+  const [tokenChecked, setTokenChecked] = useState(false)
+  const tokenRef = useRef(searchParams.get('token'))
 
   const recognitionRef = useRef(null)
   const timerRef = useRef(null)
   const transcriptRef = useRef('')
   const fullTranscriptRef = useRef('')
-  const finishRef = useRef(null)         // stable ref to finish so timer closure is never stale
-  const currentIndexRef = useRef(0)      // stable ref so advance() always reads latest index
-  const questionsRef = useRef(questions) // stable ref so finish() always reads latest questions
+  const finishRef = useRef(null)
+  const currentIndexRef = useRef(0)
+  const questionsRef = useRef(questions)
 
-  // Keep refs in sync
+  // TTS state
+  const [ttsEnabled, setTtsEnabled] = useState(getTTSEnabled)
+  const [isSpeaking, setIsSpeaking] = useState(false)
+  const ttsEnabledRef = useRef(ttsEnabled)
+  const ttsCancelRef = useRef(false)
+  const ttsKeepaliveRef = useRef(null)
+
+  useEffect(() => {
+    ttsEnabledRef.current = ttsEnabled
+    setTTSEnabled(ttsEnabled)
+  }, [ttsEnabled])
+
   useEffect(() => { currentIndexRef.current = currentIndex }, [currentIndex])
   useEffect(() => { questionsRef.current = questions }, [questions])
+  useEffect(() => { isWrapUpRef.current = isWrapUp }, [isWrapUp])
 
-  // Load session if no state
   useEffect(() => {
     if (!state?.questions) {
       axios.get(`${API}/api/interview/session/${sessionId}`).then(({ data }) => {
@@ -40,7 +84,22 @@ export default function Interview() {
     }
   }, [sessionId])
 
-  // Timer — uses finishRef so it always calls the latest finish()
+  // Validate invite token if present
+  useEffect(() => {
+    const token = tokenRef.current
+    if (!token) { setTokenChecked(true); return }
+    const validate = async () => {
+      try {
+        const { data } = await axios.get(`${MAIN_API}/api/screenings/validate-token/${token}`)
+        if (!data.valid) { setTokenError(data.reason); setTokenChecked(true); return }
+        // Mark in_progress
+        await axios.post(`${MAIN_API}/api/screenings/start-from-token/${token}`, {})
+      } catch (e) { console.warn('Token validation failed', e) }
+      setTokenChecked(true)
+    }
+    validate()
+  }, [])
+
   useEffect(() => {
     timerRef.current = setInterval(() => {
       setTimeLeft(t => {
@@ -61,25 +120,103 @@ export default function Interview() {
     return () => clearInterval(timerRef.current)
   }, [])
 
-  // Auto-start recording only when currentIndex changes (not on every render)
   useEffect(() => {
     if (questionsRef.current.length === 0) return
     transcriptRef.current = ''
     setTranscript('')
-    startRecording()
-    // no cleanup stopRecording here — we call it explicitly before advancing
-  }, [currentIndex]) // eslint-disable-line react-hooks/exhaustive-deps
+    const q = questionsRef.current[currentIndex]
+    speakThenRecord(q?.voice_text || q?.question || '')
+  }, [currentIndex, speakThenRecord])
 
-  // Start recording once questions load (first question)
   useEffect(() => {
     if (questions.length > 0 && currentIndex === 0) {
       transcriptRef.current = ''
       setTranscript('')
-      startRecording()
+      const q = questions[0]
+      speakThenRecord(q?.voice_text || q?.question || '')
     }
-  }, [questions.length]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [questions.length, speakThenRecord])
 
   const formatTime = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+
+  // ── TTS ──────────────────────────────────────────────────────────────────────
+
+  const cancelSpeech = () => {
+    ttsCancelRef.current = true
+    clearInterval(ttsKeepaliveRef.current)
+    window.speechSynthesis?.cancel()
+    setIsSpeaking(false)
+  }
+
+  const speakThenRecord = useCallback((text) => {
+    cancelSpeech()
+    if (!ttsEnabledRef.current || !window.speechSynthesis) {
+      startRecording()
+      return
+    }
+
+    ttsCancelRef.current = false
+    setIsSpeaking(true)
+
+    // Chrome bug: voices may not be loaded yet on first call
+    const doSpeak = () => {
+      if (ttsCancelRef.current) return
+      const utterance = new SpeechSynthesisUtterance(text)
+      utterance.rate = 0.92
+      utterance.pitch = 1
+      utterance.volume = 1
+      const voice = getBestVoice()
+      if (voice) utterance.voice = voice
+
+      utterance.onend = () => {
+        clearInterval(ttsKeepaliveRef.current)
+        setIsSpeaking(false)
+        if (!ttsCancelRef.current) startRecording()
+      }
+      utterance.onerror = () => {
+        clearInterval(ttsKeepaliveRef.current)
+        setIsSpeaking(false)
+        if (!ttsCancelRef.current) startRecording()
+      }
+
+      window.speechSynthesis.speak(utterance)
+
+      // Chrome keepalive: speechSynthesis silently stops after ~15s
+      ttsKeepaliveRef.current = setInterval(() => {
+        if (window.speechSynthesis.speaking) {
+          window.speechSynthesis.pause()
+          window.speechSynthesis.resume()
+        }
+      }, 10000)
+    }
+
+    // Voices may not be loaded yet (Chrome loads async)
+    if (window.speechSynthesis.getVoices().length > 0) {
+      doSpeak()
+    } else {
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.onvoiceschanged = null
+        doSpeak()
+      }
+      // Fallback if onvoiceschanged never fires
+      setTimeout(doSpeak, 500)
+    }
+  }, [])
+
+  const replayQuestion = () => {
+    const q = questionsRef.current[currentIndexRef.current]
+    if (!q) return
+    cancelSpeech()
+    stopRecording()
+    speakThenRecord(q.voice_text || q.question)
+  }
+
+  const toggleTTS = () => {
+    if (isSpeaking) cancelSpeech()
+    setTtsEnabled(v => !v)
+  }
+
+  // ── Recording ─────────────────────────────────────────────────────────────
 
   const startRecording = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
@@ -98,7 +235,6 @@ export default function Interview() {
       setTranscript(t)
     }
     r.onend = () => {
-      // auto-restart only if this is still the active recognition instance
       if (recognitionRef.current === r) {
         try { r.start() } catch (_) {}
       }
@@ -131,20 +267,19 @@ export default function Interview() {
     const qs = questionsRef.current
     transcriptRef.current = ''
     setTranscript('')
-    if (idx + 1 >= qs.length) {
-      finishRef.current?.()
-    } else {
-      setCurrentIndex(idx + 1)
-    }
+    if (idx + 1 >= qs.length) finishRef.current?.()
+    else setCurrentIndex(idx + 1)
   }
 
   const nextQuestion = () => {
+    cancelSpeech()
     stopRecording()
     commitToTranscript(transcriptRef.current, false)
     advance()
   }
 
   const skip = () => {
+    cancelSpeech()
     stopRecording()
     commitToTranscript('', true)
     advance()
@@ -152,6 +287,7 @@ export default function Interview() {
 
   const finish = useCallback(async () => {
     clearInterval(timerRef.current)
+    cancelSpeech()
     stopRecording()
     commitToTranscript(transcriptRef.current, false)
     setFinishing(true)
@@ -161,88 +297,150 @@ export default function Interview() {
         questions: questionsRef.current,
       })
     } catch (e) { console.error(e) }
-    navigate(`/report/${sessionId}`)
+    if (tokenRef.current) {
+      navigate('/thank-you')
+    } else {
+      navigate(`/report/${sessionId}`, { state: { isTest: true } })
+    }
   }, [sessionId, navigate])
 
-  useEffect(() => { isWrapUpRef.current = isWrapUp }, [isWrapUp])
-
-  // Keep finishRef pointing to latest finish
   useEffect(() => { finishRef.current = finish }, [finish])
 
   const q = questions[currentIndex]
   const progress = questions.length > 0 ? (currentIndex / questions.length) * 100 : 0
-  const timerColor = isWrapUp ? 'text-orange-400' : timeLeft < 60 ? 'text-red-400' : timeLeft < 300 ? 'text-yellow-400' : 'text-green-400'
 
-  if (finishing) return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-4 text-gray-300">
-      <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-      <p>Generating your report...</p>
+  const timerColor = isWrapUp
+    ? 'text-amber-600'
+    : timeLeft < 60
+      ? 'text-red-600'
+      : timeLeft < 300
+        ? 'text-amber-500'
+        : 'text-emerald-600'
+
+  if (tokenError) return (
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-4 p-6 text-center">
+      <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center text-red-600 text-xl">✗</div>
+      <h2 className="text-lg font-semibold text-slate-800">Interview Unavailable</h2>
+      <p className="text-slate-500 text-sm max-w-sm">{tokenError}</p>
     </div>
   )
 
-  if (!q) return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading...</div>
+  if (!tokenChecked) return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="spinner" />
+    </div>
+  )
+
+  if (finishing) return (
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-4 text-slate-500">
+      <div className="spinner" />
+      <p className="text-sm font-medium">Submitting your interview…</p>
+    </div>
+  )
+
+  if (!q) return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-400 text-sm">
+      Loading…
+    </div>
+  )
 
   return (
-    <div className="min-h-screen flex flex-col p-6 max-w-3xl mx-auto">
+    <div className="min-h-screen bg-slate-50 flex flex-col p-6 max-w-3xl mx-auto">
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <span className="text-gray-400 text-sm">Question {currentIndex + 1} of {questions.length}</span>
-        <div className="text-right">
-          <span className={`font-mono text-2xl font-bold ${timerColor}`}>{formatTime(timeLeft)}</span>
-          {isWrapUp && <p className="text-orange-400 text-xs mt-0.5 font-medium">Wrap-up time — finish your thought</p>}
-          {!isWrapUp && timeLeft < 60 && <p className="text-red-400 text-xs mt-0.5">{formatTime(timeLeft)} left · 2:00 wrap-up follows</p>}
-        </div>
-      </div>
-
-      {/* Progress */}
-      <div className="w-full h-1.5 bg-gray-800 rounded-full mb-8">
-        <div className="h-1.5 bg-blue-500 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
-      </div>
-
-      {/* Question */}
-      <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800 mb-6">
-        <div className="flex items-center gap-2 mb-3">
-          <span className="text-xs bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full">{q.topic || 'Technical'}</span>
-          {isRecording && (
-            <span className="text-xs text-red-400 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse inline-block" />
-              Recording
-            </span>
+        <div>
+          <p className="text-sm font-medium text-slate-500">Question {currentIndex + 1} of {questions.length}</p>
+          {isWrapUp && (
+            <p className="text-xs text-amber-600 font-medium mt-0.5">Wrap-up time — finish your thought</p>
+          )}
+          {!isWrapUp && timeLeft < 60 && (
+            <p className="text-xs text-red-500 mt-0.5">{formatTime(timeLeft)} left · 2:00 wrap-up follows</p>
           )}
         </div>
-        <p className="text-xl text-white leading-relaxed">{q.question}</p>
+        <div className="text-right">
+          <span className={`font-mono text-2xl font-bold ${timerColor}`}>{formatTime(timeLeft)}</span>
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div className="w-full h-1.5 bg-slate-200 rounded-full mb-8">
+        <div
+          className="h-1.5 bg-primary-600 rounded-full transition-all duration-500"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+
+      {/* Question card */}
+      <div className="card p-6 mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <span className="badge badge-primary">{q.topic || 'Technical'}</span>
+            {isSpeaking && (
+              <span className="inline-flex items-center gap-1 text-xs text-indigo-500 font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse inline-block" />
+                Speaking…
+              </span>
+            )}
+            {isRecording && !isSpeaking && (
+              <span className="inline-flex items-center gap-1 text-xs text-red-500 font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
+                Recording
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            {/* Replay button — only show when not currently speaking */}
+            {ttsEnabled && !isSpeaking && (
+              <button
+                onClick={replayQuestion}
+                title="Replay question"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors text-sm"
+              >
+                ↺
+              </button>
+            )}
+            {/* Mute/unmute toggle */}
+            <button
+              onClick={toggleTTS}
+              title={ttsEnabled ? 'Mute voice (read questions yourself)' : 'Unmute voice'}
+              className={`p-1.5 rounded-lg transition-colors text-sm ${
+                ttsEnabled
+                  ? 'text-indigo-600 hover:bg-indigo-50'
+                  : 'text-slate-300 hover:text-slate-500 hover:bg-slate-100'
+              }`}
+            >
+              {ttsEnabled ? '🔊' : '🔇'}
+            </button>
+          </div>
+        </div>
+        <p className="text-lg font-medium text-slate-800 leading-relaxed">{q.question}</p>
+        {isSpeaking && (
+          <p className="text-xs text-slate-400 mt-3 italic">Listening starts automatically after the question is read…</p>
+        )}
       </div>
 
       {/* Transcript (debug) */}
-      <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 mb-4 min-h-32 flex-1">
+      <div className="card p-4 mb-4 flex-1 min-h-32">
         {transcript ? (
-          <p className="text-gray-200 text-sm leading-relaxed">{transcript}</p>
+          <p className="text-slate-700 text-sm leading-relaxed">{transcript}</p>
         ) : (
-          <p className="text-gray-600 text-sm italic">
-            {isRecording ? 'Listening... speak your answer' : 'Microphone inactive'}
+          <p className="text-slate-400 text-sm italic">
+            {isRecording ? 'Listening… speak your answer' : 'Microphone inactive'}
           </p>
         )}
       </div>
 
       {/* Controls */}
       <div className="flex gap-3">
-        <button
-          onClick={nextQuestion}
-          className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl transition-colors"
-        >
+        <button onClick={nextQuestion} className="btn btn-primary flex-1">
           {currentIndex + 1 >= questions.length ? 'Finish Interview' : 'Next Question →'}
         </button>
-        <button
-          onClick={skip}
-          className="px-5 py-3 bg-gray-800 hover:bg-gray-700 text-gray-400 rounded-xl transition-colors text-sm"
-        >
+        <button onClick={skip} className="btn btn-secondary px-5">
           Skip
         </button>
-        <button
-          onClick={finish}
-          className="px-5 py-3 bg-red-900 hover:bg-red-800 text-red-300 rounded-xl transition-colors text-sm"
-        >
-          End Interview
+        <button onClick={finish} className="btn btn-danger px-5">
+          End
         </button>
       </div>
     </div>

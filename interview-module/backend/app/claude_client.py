@@ -39,9 +39,14 @@ Generate exactly {num_questions} interview questions following these rules:
 3. Before finalising the list, review it and remove any question whose core concept is already covered by another question in the list. Replace it with a question on a different topic.
 4. For difficulty 1-2, focus on fundamentals. For 3, balanced technical depth. For 4-5, focus on system design, trade-offs, and deep expertise.
 5. Order questions from foundational to advanced.
+6. For each question, also write a "voice_text" version — a natural, conversational rephrasing suitable for being read aloud by a voice assistant. The voice_text should:
+   - Remove code formatting, backticks, and symbols that sound awkward when spoken
+   - Use conversational phrasing ("Can you walk me through..." instead of "Explain...")
+   - Be slightly warmer and more natural in tone
+   - Be roughly the same length or slightly shorter than the screen question
 
 Return ONLY a JSON array like:
-[{{"question": "...", "topic": "...", "expected_depth": "..."}}]"""
+[{{"question": "...", "voice_text": "...", "topic": "...", "expected_depth": "..."}}]"""
 
     resp = client.messages.create(
         model="claude-sonnet-4-5-20250929",
@@ -146,14 +151,14 @@ Write a comprehensive hiring report. Return ONLY JSON:
 
 def _mock_questions(n: int) -> list:
     samples = [
-        {"question": "Explain how you would design a thread-safe singleton in iOS.", "topic": "Concurrency", "expected_depth": "Knows DispatchQueue, NSLock approaches"},
-        {"question": "What is the difference between strong, weak, and unowned references?", "topic": "Memory Management", "expected_depth": "ARC, retain cycles, when to use each"},
-        {"question": "How does UITableView reuse cells and why is it important?", "topic": "UIKit", "expected_depth": "dequeueReusableCell, memory efficiency"},
-        {"question": "Describe your approach to offline-first architecture in a mobile app.", "topic": "Architecture", "expected_depth": "Local DB, sync strategy, conflict resolution"},
-        {"question": "How would you optimize an app that scrolls poorly at 30fps?", "topic": "Performance", "expected_depth": "Instruments, off-main-thread rendering, cell pre-sizing"},
-        {"question": "What are the trade-offs between SwiftUI and UIKit?", "topic": "Frameworks", "expected_depth": "Maturity, interop, state management"},
-        {"question": "How do you handle API errors gracefully in production?", "topic": "Networking", "expected_depth": "Retry logic, user feedback, logging"},
-        {"question": "Walk me through how you would architect a large-scale iOS app.", "topic": "System Design", "expected_depth": "Modularity, dependency injection, testability"},
+        {"question": "Explain how you would design a thread-safe singleton in iOS.", "voice_text": "Can you walk me through how you'd design a thread-safe singleton in iOS?", "topic": "Concurrency", "expected_depth": "Knows DispatchQueue, NSLock approaches"},
+        {"question": "What is the difference between strong, weak, and unowned references?", "voice_text": "Can you explain the difference between strong, weak, and unowned references in Swift?", "topic": "Memory Management", "expected_depth": "ARC, retain cycles, when to use each"},
+        {"question": "How does UITableView reuse cells and why is it important?", "voice_text": "How does UITableView handle cell reuse, and why does that matter for performance?", "topic": "UIKit", "expected_depth": "dequeueReusableCell, memory efficiency"},
+        {"question": "Describe your approach to offline-first architecture in a mobile app.", "voice_text": "How would you approach building an offline-first mobile app? Walk me through your thinking.", "topic": "Architecture", "expected_depth": "Local DB, sync strategy, conflict resolution"},
+        {"question": "How would you optimize an app that scrolls poorly at 30fps?", "voice_text": "If an app was scrolling poorly at around 30 frames per second, how would you go about diagnosing and fixing that?", "topic": "Performance", "expected_depth": "Instruments, off-main-thread rendering, cell pre-sizing"},
+        {"question": "What are the trade-offs between SwiftUI and UIKit?", "voice_text": "Can you walk me through the main trade-offs between SwiftUI and UIKit, and when you'd pick one over the other?", "topic": "Frameworks", "expected_depth": "Maturity, interop, state management"},
+        {"question": "How do you handle API errors gracefully in production?", "voice_text": "How do you handle API errors gracefully in a production app?", "topic": "Networking", "expected_depth": "Retry logic, user feedback, logging"},
+        {"question": "Walk me through how you would architect a large-scale iOS app.", "voice_text": "How would you architect a large-scale iOS app? Walk me through your approach.", "topic": "System Design", "expected_depth": "Modularity, dependency injection, testability"},
     ]
     return samples[:n]
 

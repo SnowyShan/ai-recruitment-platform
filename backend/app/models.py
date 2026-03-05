@@ -75,7 +75,13 @@ class Job(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     deadline = Column(DateTime, nullable=True)
-    
+
+    # Interview / screening config (per-job overrides)
+    interview_time_limit    = Column(Integer, default=45)
+    interview_num_questions = Column(Integer, default=8)
+    interview_difficulty    = Column(Integer, default=3)
+    interview_seniority     = Column(String(20), default="mid")
+
     # Relationships
     created_by_user = relationship("User", back_populates="jobs")
     applications = relationship("Application", back_populates="job")
@@ -152,6 +158,11 @@ class Screening(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     source = Column(String(20), default="manual")  # manual, auto, bulk
+    interview_session_id = Column(String(36), nullable=True)   # UUID from interview module
+    invite_token = Column(String(36), nullable=True, unique=True)
+    invite_sent_at = Column(DateTime, nullable=True)
+    invite_expires_at = Column(DateTime, nullable=True)
+    invite_used = Column(Boolean, default=False)
 
     # Relationships
     application = relationship("Application", back_populates="screenings")

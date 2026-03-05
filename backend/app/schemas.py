@@ -115,6 +115,10 @@ class JobUpdate(BaseModel):
     benefits: Optional[str] = None
     status: Optional[str] = None
     deadline: Optional[datetime] = None
+    interview_time_limit: Optional[int] = None
+    interview_num_questions: Optional[int] = None
+    interview_difficulty: Optional[int] = None
+    interview_seniority: Optional[str] = None
 
 
 class JobResponse(JobBase):
@@ -124,7 +128,11 @@ class JobResponse(JobBase):
     created_at: datetime
     updated_at: datetime
     applications_count: Optional[int] = 0
-    
+    interview_time_limit: Optional[int] = 45
+    interview_num_questions: Optional[int] = 8
+    interview_difficulty: Optional[int] = 3
+    interview_seniority: Optional[str] = "mid"
+
     class Config:
         from_attributes = True
 
@@ -240,6 +248,11 @@ class ScreeningResponse(BaseModel):
     ai_evaluation: Optional[str] = None
     notes: Optional[str] = None
     source: Optional[str] = None
+    interview_session_id: Optional[str] = None
+    invite_token: Optional[str] = None
+    invite_sent_at: Optional[datetime] = None
+    invite_expires_at: Optional[datetime] = None
+    invite_used: Optional[bool] = None
     created_at: datetime
 
     class Config:

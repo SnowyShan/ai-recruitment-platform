@@ -6,7 +6,7 @@ import os
 from dotenv import load_dotenv
 
 from sqlalchemy import inspect, text
-from .database import engine, Base
+from .database import engine, Base, run_migrations
 from .routers import (
     auth_router,
     jobs_router,
@@ -25,6 +25,7 @@ load_dotenv()
 async def lifespan(app: FastAPI):
     # Create tables (new tables only — does not alter existing ones)
     Base.metadata.create_all(bind=engine)
+    run_migrations(engine)
 
     # Lightweight column migrations for existing tables
     insp = inspect(engine)

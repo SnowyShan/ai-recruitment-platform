@@ -1,6 +1,6 @@
 ALEX CHEN
 Senior iOS Developer
-San Francisco, CA | alex.chen@email.com | linkedin.com/in/alexchen | github.com/alexchen-ios
+San Francisco, CA | indraShanbhag@gmail.com | linkedin.com/in/alexchen | github.com/alexchen-ios
 
 SUMMARY
 Senior iOS Developer with 7 years of experience building and shipping consumer-grade iOS applications. Passionate about clean architecture, performance optimization, and mentoring engineers. Shipped apps with 10M+ downloads and led mobile teams at both startups and mid-size companies.

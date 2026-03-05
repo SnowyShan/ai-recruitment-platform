@@ -17,6 +17,11 @@ import {
   ChevronRight,
   ChevronDown,
   Zap,
+  Settings,
+  Clock,
+  HelpCircle,
+  ChevronUp,
+  Save,
 } from 'lucide-react';
 import { jobsAPI, applicationsAPI, screeningsAPI } from '../services/api';
 
@@ -247,7 +252,8 @@ function SourceBadge({ source }) {
 
 // ─── Candidate Row ────────────────────────────────────────────────────────────
 
-function CandidateRow({ app, selected, onToggle, onAction, onOpenNote }) {
+function CandidateRow({ app, selected, onToggle, onAction, onOpenNote, onViewReport }) {
+  const [inviting, setInviting] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
 
   const screenings = (app.screenings || [])
@@ -259,7 +265,7 @@ function CandidateRow({ app, selected, onToggle, onAction, onOpenNote }) {
 
   // Only block invite if a screening is currently active (scheduled or in_progress).
   // Completed, cancelled, or no prior screenings → recruiter can always send a new invite.
-  const hasActiveScreening = screenings.some(s => ['scheduled', 'in_progress'].includes(s.status));
+  const hasActiveScreening = screenings.some(s => s.status === 'in_progress');
   const disableApprove = ['shortlisted', 'interview', 'offered', 'hired'].includes(app.status);
   const disableReject  = app.status === 'rejected';
 
@@ -325,12 +331,14 @@ function CandidateRow({ app, selected, onToggle, onAction, onOpenNote }) {
         <td className="px-4 py-3">
           <div className="flex items-center gap-1">
             <button
-              disabled={hasActiveScreening}
-              onClick={() => onAction('invite', app.id)}
+              disabled={hasActiveScreening || inviting}
+              onClick={async () => { setInviting(true); await onAction('invite', app.id); setInviting(false); }}
               title={hasActiveScreening ? 'Screening already in progress' : 'Send screening invite'}
               className="p-1.5 rounded hover:bg-blue-50 text-blue-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
-              <Mail className="w-3.5 h-3.5" />
+              {inviting
+                ? <div className="w-3.5 h-3.5 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
+                : <Mail className="w-3.5 h-3.5" />}
             </button>
             <button
               disabled={disableApprove}
@@ -373,6 +381,7 @@ function CandidateRow({ app, selected, onToggle, onAction, onOpenNote }) {
                     <th className="px-3 py-2 text-left font-medium">Score</th>
                     <th className="px-3 py-2 text-left font-medium">Technical</th>
                     <th className="px-3 py-2 text-left font-medium">Communication</th>
+                    <th className="px-3 py-2 text-left font-medium">Report</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
@@ -398,6 +407,16 @@ function CandidateRow({ app, selected, onToggle, onAction, onOpenNote }) {
                         <td className="px-3 py-2 text-slate-700">
                           {s.communication_score != null ? `${s.communication_score}%` : '–'}
                         </td>
+                        <td className="px-3 py-2">
+                          {s.ai_evaluation && (
+                            <button
+                              onClick={() => onViewReport && onViewReport(s)}
+                              className="text-xs text-primary-600 hover:underline font-medium"
+                            >
+                              View Report
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -409,6 +428,86 @@ function CandidateRow({ app, selected, onToggle, onAction, onOpenNote }) {
       )}
     </>
   );
+}
+
+
+// ─── Report Modal ─────────────────────────────────────────────────────────────
+
+function ReportModal({ screening, onClose }) {
+  if (!screening) return null
+  let ev = {}
+  try { ev = JSON.parse(screening.ai_evaluation || '{}') } catch (_) {}
+  const perQ = ev.per_question || []
+  const pass = screening.recommendation === 'pass' || screening.recommendation === 'strong_pass'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <div>
+            <h3 className="text-base font-semibold text-slate-800">Screening Report</h3>
+            <p className="text-xs text-slate-500 mt-0.5">Round result: <span className={pass ? 'text-emerald-600 font-medium' : 'text-red-600 font-medium'}>{pass ? 'Pass' : 'Did not pass'}</span></p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="p-6 space-y-5">
+          {/* Score */}
+          <div className="flex items-center gap-4">
+            <div className={`w-16 h-16 rounded-full border-4 flex items-center justify-center font-bold text-lg
+              ${screening.overall_score >= 70 ? 'border-emerald-400 text-emerald-600' : screening.overall_score >= 50 ? 'border-amber-400 text-amber-600' : 'border-red-400 text-red-600'}`}>
+              {screening.overall_score ?? '–'}
+            </div>
+            <p className="text-slate-600 text-sm flex-1">{ev.summary}</p>
+          </div>
+
+          {/* Strengths / Weaknesses */}
+          {(ev.strengths?.length > 0 || ev.weaknesses?.length > 0) && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs font-semibold text-emerald-700 mb-2">Strengths</p>
+                <ul className="space-y-1">{(ev.strengths || []).map((s,i) => <li key={i} className="text-slate-600 text-xs">• {s}</li>)}</ul>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-red-600 mb-2">Areas to Improve</p>
+                <ul className="space-y-1">{(ev.weaknesses || []).map((w,i) => <li key={i} className="text-slate-600 text-xs">• {w}</li>)}</ul>
+              </div>
+            </div>
+          )}
+
+          {/* Recommendation */}
+          {ev.hiring_recommendation && (
+            <div className="bg-slate-50 rounded-xl p-4">
+              <p className="text-xs font-semibold text-slate-700 mb-1">Hiring Recommendation</p>
+              <p className="text-slate-600 text-sm">{ev.hiring_recommendation}</p>
+            </div>
+          )}
+
+          {/* Per question */}
+          {perQ.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-slate-700 mb-3">Per-Question Breakdown</p>
+              <div className="space-y-2">
+                {perQ.map((pq, i) => (
+                  <div key={i} className="border border-slate-100 rounded-xl p-3">
+                    <div className="flex justify-between items-start gap-3 mb-1">
+                      <p className="text-slate-700 text-xs font-medium flex-1">{pq.question}</p>
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0
+                        ${pq.score >= 70 ? 'bg-emerald-50 text-emerald-600' : pq.score >= 50 ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-600'}`}>
+                        {pq.score}/100
+                      </span>
+                    </div>
+                    <p className="text-slate-500 text-xs">{pq.feedback}</p>
+                    {pq.what_was_good && <p className="text-emerald-600 text-xs mt-1">✓ {pq.what_was_good}</p>}
+                    {pq.what_was_missing && <p className="text-red-500 text-xs mt-0.5">✗ {pq.what_was_missing}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -428,6 +527,9 @@ export default function JobDetail() {
 
   // Note modal
   const [noteApp, setNoteApp]       = useState(null);
+
+  // Report modal
+  const [reportScreening, setReportScreening] = useState(null);
 
   // ── data loading ──────────────────────────────────────────────────────────
 
@@ -501,15 +603,16 @@ export default function JobDetail() {
       let res;
       if (type === 'invite') {
         res = await screeningsAPI.create({ application_id: appId });
-        updateRow({ id: appId, status: 'screening' });
+        await Promise.all([loadPipeline(), loadApplications(statusFilter)]);
       } else if (type === 'approve') {
         res = await applicationsAPI.shortlist(appId);
         updateRow(res.data);
+        await loadPipeline();
       } else if (type === 'reject') {
         res = await applicationsAPI.reject(appId);
         updateRow(res.data);
+        await loadPipeline();
       }
-      await loadPipeline();
     } catch (err) {
       console.error(`Action ${type} failed`, err);
     }
@@ -541,6 +644,10 @@ export default function JobDetail() {
   // ── bulk invite ───────────────────────────────────────────────────────────
 
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [showScreeningConfig, setShowScreeningConfig] = useState(false);
+  const [screeningConfig, setScreeningConfig] = useState(null);
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [configSaved, setConfigSaved] = useState(false);
 
   const handleBulkInvite = async () => {
     setBulkLoading(true);
@@ -591,6 +698,34 @@ export default function JobDetail() {
 
   const salary = formatSalary(job.salary_min, job.salary_max);
   const allSelected = applications.length > 0 && selected.size === applications.length;
+
+  // Initialise screeningConfig from job on first render
+  if (screeningConfig === null && job) {
+    setScreeningConfig({
+      time_limit: job.interview_time_limit ?? 45,
+      num_questions: job.interview_num_questions ?? 8,
+      difficulty: job.interview_difficulty ?? 3,
+      seniority: job.interview_seniority ?? 'mid',
+    });
+  }
+
+  const handleSaveScreeningConfig = async () => {
+    setSavingConfig(true);
+    try {
+      await jobsAPI.update(job.id, {
+        interview_time_limit: screeningConfig.time_limit,
+        interview_num_questions: screeningConfig.num_questions,
+        interview_difficulty: screeningConfig.difficulty,
+        interview_seniority: screeningConfig.seniority,
+      });
+      setConfigSaved(true);
+      setTimeout(() => setConfigSaved(false), 2000);
+    } catch (e) {
+      console.error('Failed to save screening config', e);
+    } finally {
+      setSavingConfig(false);
+    }
+  };
 
   return (
     <div className="space-y-6 pb-24 animate-fade-in">
@@ -680,6 +815,117 @@ export default function JobDetail() {
       {/* ── Stage Filter Strip ── */}
       <StageFilterStrip active={statusFilter} onSelect={handlePillSelect} />
 
+      {/* ── Screening Config ── */}
+      <div className="card overflow-hidden">
+        <button
+          onClick={() => setShowScreeningConfig(v => !v)}
+          className="w-full flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors"
+        >
+          <div className="flex items-center gap-2 text-slate-700 font-semibold">
+            <Settings className="w-4 h-4 text-slate-500" />
+            Screening Interview Config
+          </div>
+          {showScreeningConfig ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+        </button>
+
+        {showScreeningConfig && screeningConfig && (
+          <div className="px-6 pb-6 border-t border-slate-100 pt-5 grid grid-cols-1 sm:grid-cols-2 gap-6">
+
+            {/* Time limit */}
+            <div>
+              <label className="flex items-center gap-1.5 text-sm font-medium text-slate-700 mb-2">
+                <Clock className="w-4 h-4 text-slate-400" />
+                Interview Duration
+              </label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range" min={15} max={90} step={5}
+                  value={screeningConfig.time_limit}
+                  onChange={e => setScreeningConfig(c => ({ ...c, time_limit: +e.target.value }))}
+                  className="flex-1 accent-indigo-600"
+                />
+                <span className="w-16 text-center text-sm font-semibold text-slate-700 bg-slate-100 rounded-lg py-1">
+                  {screeningConfig.time_limit} min
+                </span>
+              </div>
+            </div>
+
+            {/* Number of questions */}
+            <div>
+              <label className="flex items-center gap-1.5 text-sm font-medium text-slate-700 mb-2">
+                <HelpCircle className="w-4 h-4 text-slate-400" />
+                Number of Questions
+              </label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range" min={3} max={15} step={1}
+                  value={screeningConfig.num_questions}
+                  onChange={e => setScreeningConfig(c => ({ ...c, num_questions: +e.target.value }))}
+                  className="flex-1 accent-indigo-600"
+                />
+                <span className="w-16 text-center text-sm font-semibold text-slate-700 bg-slate-100 rounded-lg py-1">
+                  {screeningConfig.num_questions} Qs
+                </span>
+              </div>
+            </div>
+
+            {/* Difficulty */}
+            <div>
+              <label className="text-sm font-medium text-slate-700 mb-2 block">Difficulty</label>
+              <div className="flex gap-2">
+                {[{v:1,l:'Easy'},{v:2,l:'Moderate'},{v:3,l:'Standard'},{v:4,l:'Hard'},{v:5,l:'Expert'}].map(({v,l}) => (
+                  <button
+                    key={v}
+                    onClick={() => setScreeningConfig(c => ({ ...c, difficulty: v }))}
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                      screeningConfig.difficulty === v
+                        ? 'bg-indigo-600 text-white border-indigo-600'
+                        : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'
+                    }`}
+                  >{l}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Seniority */}
+            <div>
+              <label className="text-sm font-medium text-slate-700 mb-2 block">Seniority Bar</label>
+              <div className="flex gap-2">
+                {[{v:'junior',l:'Junior'},{v:'mid',l:'Mid'},{v:'senior',l:'Senior'},{v:'lead',l:'Lead'}].map(({v,l}) => (
+                  <button
+                    key={v}
+                    onClick={() => setScreeningConfig(c => ({ ...c, seniority: v }))}
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                      screeningConfig.seniority === v
+                        ? 'bg-indigo-600 text-white border-indigo-600'
+                        : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'
+                    }`}
+                  >{l}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Save button */}
+            <div className="sm:col-span-2 flex justify-end pt-2">
+              <button
+                onClick={handleSaveScreeningConfig}
+                disabled={savingConfig}
+                className="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+              >
+                {savingConfig ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : configSaved ? (
+                  <CheckCircle className="w-4 h-4" />
+                ) : (
+                  <Save className="w-4 h-4" />
+                )}
+                {configSaved ? 'Saved!' : 'Save Config'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* ── Candidate Table ── */}
       <div className="card overflow-hidden">
         {applications.length === 0 ? (
@@ -716,6 +962,7 @@ export default function JobDetail() {
                     onToggle={toggleSelect}
                     onAction={handleAction}
                     onOpenNote={setNoteApp}
+                    onViewReport={setReportScreening}
                   />
                 ))}
               </tbody>
@@ -749,6 +996,13 @@ export default function JobDetail() {
       )}
 
       {/* ── Note Modal ── */}
+      {reportScreening && (
+        <ReportModal
+          screening={reportScreening}
+          onClose={() => setReportScreening(null)}
+        />
+      )}
+
       {noteApp && (
         <NoteModal
           application={noteApp}

@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import axios from 'axios'
 
 const API = import.meta.env.VITE_API_URL || ''
 
 function ScoreRing({ score }) {
-  const color = score >= 70 ? 'text-green-400' : score >= 50 ? 'text-yellow-400' : 'text-red-400'
-  const bg = score >= 70 ? 'border-green-400' : score >= 50 ? 'border-yellow-400' : 'border-red-400'
+  const colorClass = score >= 70
+    ? 'border-emerald-500 text-emerald-600'
+    : score >= 50
+      ? 'border-amber-400 text-amber-600'
+      : 'border-red-400 text-red-600'
   return (
-    <div className={`w-32 h-32 rounded-full border-8 ${bg} flex items-center justify-center`}>
-      <span className={`text-4xl font-bold ${color}`}>{score}</span>
+    <div className={`w-28 h-28 rounded-full border-8 ${colorClass} flex items-center justify-center flex-shrink-0`}>
+      <span className="text-3xl font-bold">{score}</span>
     </div>
   )
 }
@@ -17,6 +20,8 @@ function ScoreRing({ score }) {
 export default function Report() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
+  const { state } = useLocation()
+  const isTest = state?.isTest ?? true  // default to showing report if navigated directly
   const [report, setReport] = useState(null)
   const [expanded, setExpanded] = useState({})
   const [loading, setLoading] = useState(true)
@@ -35,65 +40,142 @@ export default function Report() {
     load()
   }, [sessionId])
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-400">Generating report...</div>
-  if (!report) return <div className="min-h-screen flex items-center justify-center text-red-400">Failed to load report.</div>
+  // Real candidate interview — show thank you, not the report
+  if (!isTest && !loading) return (
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-6 p-6 text-center">
+      <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 text-2xl">✓</div>
+      <div>
+        <h2 className="text-xl font-bold text-slate-900 mb-2">Interview Complete</h2>
+        <p className="text-slate-500 text-sm max-w-sm">
+          Thank you for completing your screening interview. The recruiting team will review your responses and be in touch soon.
+        </p>
+      </div>
+    </div>
+  )
+
+  if (loading) return (
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-3 text-slate-400">
+      <div className="spinner" />
+      <p className="text-sm">Generating report…</p>
+    </div>
+  )
+
+  if (!report) return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center text-red-500 text-sm">
+      Failed to load report.
+    </div>
+  )
+
+  const scoreLabel = report.overall_score >= 70 ? 'text-emerald-600' : report.overall_score >= 50 ? 'text-amber-600' : 'text-red-600'
 
   return (
-    <div className="min-h-screen p-6 max-w-3xl mx-auto space-y-6">
-      <div className="text-center space-y-4">
-        <h1 className="text-3xl font-bold text-white">Interview Report</h1>
-        <div className="flex items-center justify-center gap-6">
-          <ScoreRing score={report.overall_score} />
-          <div className="text-left">
-            <div className={`text-2xl font-bold ${report.pass ? 'text-green-400' : 'text-red-400'}`}>
-              {report.pass ? '✓ PASS' : '✗ NOT PASS'}
+    <div className="min-h-screen bg-slate-50 py-10 px-6">
+      <div className="max-w-3xl mx-auto space-y-6 animate-fade-in">
+
+        {/* Header */}
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-slate-900">Interview Report</h1>
+        </div>
+
+        {/* Overall score card */}
+        <div className="card p-6">
+          <div className="flex items-center gap-6">
+            <ScoreRing score={report.overall_score} />
+            <div className="flex-1">
+              <div className={`text-xl font-bold mb-1 ${scoreLabel}`}>
+                {report.pass ? '✓ Pass' : '✗ Did not pass'}
+              </div>
+              <p className="text-slate-600 text-sm leading-relaxed">{report.summary}</p>
             </div>
-            <p className="text-gray-400 text-sm mt-1 max-w-xs">{report.summary}</p>
           </div>
         </div>
-      </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
-          <h3 className="text-green-400 font-semibold mb-3">✓ Strengths</h3>
-          <ul className="space-y-1">{(report.strengths || []).map((s, i) => <li key={i} className="text-gray-300 text-sm">• {s}</li>)}</ul>
-        </div>
-        <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
-          <h3 className="text-red-400 font-semibold mb-3">✗ Areas to Improve</h3>
-          <ul className="space-y-1">{(report.weaknesses || []).map((w, i) => <li key={i} className="text-gray-300 text-sm">• {w}</li>)}</ul>
-        </div>
-      </div>
-
-      <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
-        <h3 className="text-gray-300 font-semibold mb-2">Hiring Recommendation</h3>
-        <p className="text-gray-400 text-sm">{report.hiring_recommendation}</p>
-      </div>
-
-      <div className="space-y-3">
-        <h3 className="text-white font-semibold text-lg">Per-Question Breakdown</h3>
-        {(report.per_question || []).map((pq, i) => (
-          <div key={i} className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
-            <button onClick={() => setExpanded(e => ({ ...e, [i]: !e[i] }))} className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-800 transition-colors">
-              <span className="text-gray-200 text-sm font-medium flex-1 mr-4">{pq.question}</span>
-              <div className="flex items-center gap-3 flex-shrink-0">
-                <span className={`text-sm font-bold ${pq.score >= 70 ? 'text-green-400' : pq.score >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>{pq.score}/100</span>
-                <span className="text-gray-500 text-xs">{expanded[i] ? '▲' : '▼'}</span>
-              </div>
-            </button>
-            {expanded[i] && (
-              <div className="px-4 pb-4 space-y-2 border-t border-gray-800 pt-3">
-                <p className="text-gray-400 text-sm">{pq.feedback}</p>
-                {pq.what_was_good && <p className="text-green-400 text-xs">✓ {pq.what_was_good}</p>}
-                {pq.what_was_missing && <p className="text-red-400 text-xs">✗ {pq.what_was_missing}</p>}
-              </div>
-            )}
+        {/* Strengths / Weaknesses */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="card p-5">
+            <h3 className="text-sm font-semibold text-emerald-700 mb-3 flex items-center gap-1.5">
+              <span className="w-4 h-4 rounded-full bg-emerald-100 flex items-center justify-center text-[10px]">✓</span>
+              Strengths
+            </h3>
+            <ul className="space-y-1.5">
+              {(report.strengths || []).map((s, i) => (
+                <li key={i} className="text-slate-600 text-sm flex gap-2">
+                  <span className="text-emerald-500 mt-0.5">•</span>{s}
+                </li>
+              ))}
+            </ul>
           </div>
-        ))}
-      </div>
+          <div className="card p-5">
+            <h3 className="text-sm font-semibold text-red-600 mb-3 flex items-center gap-1.5">
+              <span className="w-4 h-4 rounded-full bg-red-100 flex items-center justify-center text-[10px]">✗</span>
+              Areas to Improve
+            </h3>
+            <ul className="space-y-1.5">
+              {(report.weaknesses || []).map((w, i) => (
+                <li key={i} className="text-slate-600 text-sm flex gap-2">
+                  <span className="text-red-400 mt-0.5">•</span>{w}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
 
-      <button onClick={() => navigate('/')} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl transition-colors">
-        Start New Interview →
-      </button>
+        {/* Recommendation */}
+        <div className="card p-5">
+          <h3 className="text-sm font-semibold text-slate-700 mb-1">Hiring Recommendation</h3>
+          <p className="text-slate-600 text-sm">{report.hiring_recommendation}</p>
+        </div>
+
+        {/* Per-question breakdown */}
+        <div>
+          <h3 className="text-base font-semibold text-slate-800 mb-3">Per-Question Breakdown</h3>
+          <div className="space-y-2">
+            {(report.per_question || []).map((pq, i) => {
+              const scoreColor = pq.score >= 70
+                ? 'text-emerald-600 bg-emerald-50'
+                : pq.score >= 50
+                  ? 'text-amber-600 bg-amber-50'
+                  : 'text-red-600 bg-red-50'
+              return (
+                <div key={i} className="card overflow-hidden">
+                  <button
+                    onClick={() => setExpanded(e => ({ ...e, [i]: !e[i] }))}
+                    className="w-full flex items-center justify-between p-4 text-left hover:bg-slate-50 transition-colors"
+                  >
+                    <span className="text-slate-700 text-sm font-medium flex-1 mr-4">{pq.question}</span>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${scoreColor}`}>
+                        {pq.score}/100
+                      </span>
+                      <span className="text-slate-400 text-xs">{expanded[i] ? '▲' : '▼'}</span>
+                    </div>
+                  </button>
+                  {expanded[i] && (
+                    <div className="px-4 pb-4 space-y-2 border-t border-slate-100 pt-3">
+                      <p className="text-slate-600 text-sm">{pq.feedback}</p>
+                      {pq.what_was_good && (
+                        <p className="text-emerald-600 text-xs flex gap-1.5">
+                          <span>✓</span>{pq.what_was_good}
+                        </p>
+                      )}
+                      {pq.what_was_missing && (
+                        <p className="text-red-500 text-xs flex gap-1.5">
+                          <span>✗</span>{pq.what_was_missing}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        <button onClick={() => navigate('/')} className="btn btn-primary w-full">
+          Start New Interview →
+        </button>
+
+      </div>
     </div>
   )
 }
