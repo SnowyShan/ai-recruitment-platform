@@ -88,20 +88,121 @@ cd interview-module/frontend && npm run dev -- --port 5174
 
 ### V2 — Task 6: TTS (Read Questions Aloud)
 
-**What:** System reads each question aloud when it appears, so candidate doesn't need to read.
+**What:** System reads each question aloud when it appears. Candidate can disable it if they prefer to read.
 
-**Plan:**
-- Phase 1: Browser `window.speechSynthesis` — zero cost, works in Chrome/Edge/Safari, implement first
-- Phase 2: ElevenLabs API — better voice quality, costs money, implement later
+---
 
-**Implementation notes:**
-- Trigger `speechSynthesis.speak()` in the `useEffect` that fires when `currentIndex` changes
-- Add a "mute" toggle so candidate can disable TTS
-- Must cancel ongoing speech when candidate advances to next question
-- File to edit: `interview-module/frontend/src/pages/Interview.jsx`
-- No backend changes needed for Phase 1
+#### Key Design Decisions
 
-**Effort:** ~2-3 hours for Phase 1 (browser TTS)
+**1. Separate voice_text from screen text**
+Questions have two text fields:
+- `question` — shown on screen. Precise, technical, may include code formatting.
+- `voice_text` — spoken aloud. Conversational phrasing, no symbols, more natural.
+
+Example:
+- Screen: `"Explain the difference between @escaping and non-escaping closures in Swift."`
+- Voice: `"Can you walk me through escaping versus non-escaping closures in Swift, and give me a real example?"`
+
+Claude generates both in the same question generation call — no extra cost.
+If `voice_text` is absent, fall back to `question`.
+
+**2. Pre-generate audio per question (not per session)**
+Questions are the same across all candidates for a job. So TTS audio is generated ONCE when a question is created and reused for every candidate — not regenerated per session.
+
+Two question types have different strategies:
+
+| Type | When Generated | Same Across Candidates? | TTS Strategy |
+|------|---------------|------------------------|--------------|
+| Hardcoded (domain questions) | Question bank creation | ✅ Yes | Generate once, cache forever |
+| Behavioral (resume-derived) | Session start | ❌ No — unique per resume | Generate at session creation |
+
+**3. On/off toggle**
+Candidate can disable TTS at any time. Preference stored in localStorage.
+When muted: recording starts immediately (current behavior).
+When unmuted: speaks question first, then recording starts.
+
+**4. Replay button**
+Candidate can replay the question audio at any time during their answer.
+
+---
+
+#### Three-Phase Implementation Plan
+
+**Phase 1 — Browser speechSynthesis (DONE / IN PROGRESS)**
+- Pure frontend change — no backend required
+- Claude question gen prompt updated to return `voice_text` alongside `question`
+- Frontend uses `window.speechSynthesis` with `voice_text`
+- Flow: question appears → speak → recording starts automatically when speech ends
+- Chrome keepalive fix required (speechSynthesis silently stops after ~15s without it)
+- On macOS, prefer neural voices for less robotic sound
+- On/off toggle + Replay button in UI
+- Files changed: `Interview.jsx` (frontend) + `claude_client.py` (prompt only)
+- Effort: ~3 hours
+
+**Phase 2 — Pre-generated audio for hardcoded questions**
+- Add `voice_text` (str) + `voice_audio_url` (str, nullable) to Question model in DB
+- When recruiter saves/edits a question in TalentBridge:
+  → Backend calls OpenAI TTS (tts-1 model, ~$0.002/question) with `voice_text`
+  → Stores MP3 at `/static/audio/q_{id}.mp3`
+  → Saves URL on the Question record
+- When session is created, hardcoded questions flow through with their `voice_audio_url`
+- Frontend: if `voice_audio_url` exists → play `<audio>` element; else → speechSynthesis fallback
+- Files: TalentBridge `models.py`, `routers/jobs.py` (question save endpoint), Interview.jsx
+- Estimated cost: ~$2 per 1,000 questions, paid once ever
+- Effort: ~1 day
+
+**Phase 3 — Session-time TTS for behavioral questions**
+- Behavioral questions are candidate-specific (generated from resume) — can't pre-generate
+- At session creation: after Claude generates behavioral questions, call TTS for each (2-4 questions)
+- Store audio per-session (e.g. `/static/audio/session_{id}/q_{idx}.mp3`)
+- Attach `voice_audio_url` to each behavioral question in the session object
+- Files: `interview-module/backend/app/routers.py` (session creation endpoint)
+- Effort: ~half day
+
+---
+
+#### Implementation Notes for Phase 1
+
+**Flow change in Interview.jsx:**
+```
+currentIndex changes
+  → window.speechSynthesis.cancel()   // stop any ongoing speech
+  → speak(voice_text || question)
+  → utterance.onend → startRecording()
+  → if muted → startRecording() immediately
+```
+
+**Chrome speechSynthesis keepalive bug:**
+Chrome silently stops speaking after ~15 seconds. Fix:
+```js
+setInterval(() => {
+  if (window.speechSynthesis.speaking) {
+    window.speechSynthesis.pause()
+    window.speechSynthesis.resume()
+  }
+}, 10000)
+```
+
+**Cancel speech on advance:**
+Add `window.speechSynthesis.cancel()` at the top of `nextQuestion()`, `skip()`, and `finish()`.
+
+**Voice selection (macOS):**
+```js
+const voices = window.speechSynthesis.getVoices()
+const preferred = voices.find(v => v.name.includes('Samantha') || v.name.includes('Alex'))
+utterance.voice = preferred || voices[0]
+```
+
+**Data model change (Claude prompt):**
+Update `generate_questions()` in `claude_client.py` to return:
+```json
+{
+  "question": "screen text",
+  "voice_text": "conversational spoken version",
+  "topic": "...",
+  "difficulty": 4
+}
+```
 
 ---
 
@@ -218,10 +319,10 @@ interview-module/
 
 ## Next Task to Build
 
-**Task 6: TTS — Read questions aloud (browser speechSynthesis)**
+**Task 6 Phase 1: Browser TTS (in progress)**
 
-Edit `interview-module/frontend/src/pages/Interview.jsx`:
-1. In the `useEffect` that fires on `currentIndex` change, add `window.speechSynthesis.speak(new SpeechSynthesisUtterance(question.question))`
-2. Cancel ongoing speech on question advance: `window.speechSynthesis.cancel()`
-3. Add a mute toggle button in the UI
-4. Test: questions should be read aloud automatically when they appear
+Files to edit:
+1. `interview-module/backend/app/claude_client.py` — update question gen prompt to return `voice_text`
+2. `interview-module/frontend/src/pages/Interview.jsx` — add TTS logic, mute toggle, replay button
+
+See full implementation notes in the Task 6 section above.
