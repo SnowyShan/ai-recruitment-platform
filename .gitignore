@@ -52,3 +52,8 @@ logs/
 
 *.log
 
+# SQLite databases (contain runtime data, never commit)
+*.db
+*.sqlite
+*.sqlite3
+
