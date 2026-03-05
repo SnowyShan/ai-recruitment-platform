@@ -22,6 +22,7 @@ import {
   HelpCircle,
   ChevronUp,
   Save,
+  PlayCircle,
 } from 'lucide-react';
 import { jobsAPI, applicationsAPI, screeningsAPI } from '../services/api';
 
@@ -648,6 +649,7 @@ export default function JobDetail() {
   const [screeningConfig, setScreeningConfig] = useState(null);
   const [savingConfig, setSavingConfig] = useState(false);
   const [configSaved, setConfigSaved] = useState(false);
+  const [launchingMock, setLaunchingMock] = useState(false);
 
   const handleBulkInvite = async () => {
     setBulkLoading(true);
@@ -708,6 +710,38 @@ export default function JobDetail() {
       seniority: job.interview_seniority ?? 'mid',
     });
   }
+
+  const handleLaunchMock = async () => {
+    setLaunchingMock(true);
+    try {
+      const INTERVIEW_API = import.meta.env.VITE_INTERVIEW_API_URL || 'http://localhost:8001';
+      const mockResume = `Mock candidate for testing the "${job.title}" interview setup.
+Skills: relevant technical and domain knowledge appropriate for this role.
+Experience: 5 years of relevant industry experience.`;
+      const jd = [job.description, job.requirements, job.responsibilities]
+        .filter(Boolean).join('\n\n');
+      const res = await fetch(`${INTERVIEW_API}/api/interview/session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          job_description: jd || job.title,
+          resume_text: mockResume,
+          difficulty: screeningConfig.difficulty,
+          seniority_bar: screeningConfig.seniority,
+          time_limit: screeningConfig.time_limit,
+          num_questions: screeningConfig.num_questions,
+        }),
+      });
+      const { session_id } = await res.json();
+      const INTERVIEW_URL = import.meta.env.VITE_INTERVIEW_URL || 'http://localhost:5174';
+      window.open(`${INTERVIEW_URL}/interview/${session_id}`, '_blank');
+    } catch (e) {
+      console.error('Failed to launch mock interview', e);
+      alert('Could not launch mock interview. Check console for details.');
+    } finally {
+      setLaunchingMock(false);
+    }
+  };
 
   const handleSaveScreeningConfig = async () => {
     setSavingConfig(true);
@@ -835,19 +869,14 @@ export default function JobDetail() {
             <div>
               <label className="flex items-center gap-1.5 text-sm font-medium text-slate-700 mb-2">
                 <Clock className="w-4 h-4 text-slate-400" />
-                Interview Duration
+                Interview Duration (minutes)
               </label>
-              <div className="flex items-center gap-3">
-                <input
-                  type="range" min={15} max={90} step={5}
-                  value={screeningConfig.time_limit}
-                  onChange={e => setScreeningConfig(c => ({ ...c, time_limit: +e.target.value }))}
-                  className="flex-1 accent-indigo-600"
-                />
-                <span className="w-16 text-center text-sm font-semibold text-slate-700 bg-slate-100 rounded-lg py-1">
-                  {screeningConfig.time_limit} min
-                </span>
-              </div>
+              <input
+                type="number" min={5} max={180}
+                value={screeningConfig.time_limit}
+                onChange={e => setScreeningConfig(c => ({ ...c, time_limit: Math.max(5, parseInt(e.target.value) || 5) }))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              />
             </div>
 
             {/* Number of questions */}
@@ -856,17 +885,12 @@ export default function JobDetail() {
                 <HelpCircle className="w-4 h-4 text-slate-400" />
                 Number of Questions
               </label>
-              <div className="flex items-center gap-3">
-                <input
-                  type="range" min={3} max={15} step={1}
-                  value={screeningConfig.num_questions}
-                  onChange={e => setScreeningConfig(c => ({ ...c, num_questions: +e.target.value }))}
-                  className="flex-1 accent-indigo-600"
-                />
-                <span className="w-16 text-center text-sm font-semibold text-slate-700 bg-slate-100 rounded-lg py-1">
-                  {screeningConfig.num_questions} Qs
-                </span>
-              </div>
+              <input
+                type="number" min={1} max={30}
+                value={screeningConfig.num_questions}
+                onChange={e => setScreeningConfig(c => ({ ...c, num_questions: Math.max(1, parseInt(e.target.value) || 1) }))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              />
             </div>
 
             {/* Difficulty */}
@@ -905,8 +929,20 @@ export default function JobDetail() {
               </div>
             </div>
 
-            {/* Save button */}
-            <div className="sm:col-span-2 flex justify-end pt-2">
+            {/* Save + Mock Interview buttons */}
+            <div className="sm:col-span-2 flex items-center justify-between pt-2">
+              <button
+                onClick={handleLaunchMock}
+                disabled={launchingMock}
+                className="inline-flex items-center gap-2 px-5 py-2 rounded-lg border border-indigo-300 text-indigo-700 bg-indigo-50 text-sm font-semibold hover:bg-indigo-100 disabled:opacity-50 transition-colors"
+              >
+                {launchingMock ? (
+                  <div className="w-4 h-4 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" />
+                ) : (
+                  <PlayCircle className="w-4 h-4" />
+                )}
+                {launchingMock ? 'Launching…' : 'Mock Interview'}
+              </button>
               <button
                 onClick={handleSaveScreeningConfig}
                 disabled={savingConfig}

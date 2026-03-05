@@ -55,6 +55,7 @@ export default function Interview() {
   const timerRef = useRef(null)
   const transcriptRef = useRef('')
   const fullTranscriptRef = useRef('')
+  const questionAnswersRef = useRef({}) // live per-question answer map, updated on every onresult
   const finishRef = useRef(null)
   const currentIndexRef = useRef(0)
   const questionsRef = useRef(questions)
@@ -120,23 +121,6 @@ export default function Interview() {
     return () => clearInterval(timerRef.current)
   }, [])
 
-  useEffect(() => {
-    if (questionsRef.current.length === 0) return
-    transcriptRef.current = ''
-    setTranscript('')
-    const q = questionsRef.current[currentIndex]
-    speakThenRecord(q?.voice_text || q?.question || '')
-  }, [currentIndex, speakThenRecord])
-
-  useEffect(() => {
-    if (questions.length > 0 && currentIndex === 0) {
-      transcriptRef.current = ''
-      setTranscript('')
-      const q = questions[0]
-      speakThenRecord(q?.voice_text || q?.question || '')
-    }
-  }, [questions.length, speakThenRecord])
-
   const formatTime = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 
   // ── TTS ──────────────────────────────────────────────────────────────────────
@@ -181,13 +165,17 @@ export default function Interview() {
 
       window.speechSynthesis.speak(utterance)
 
-      // Chrome keepalive: speechSynthesis silently stops after ~15s
-      ttsKeepaliveRef.current = setInterval(() => {
-        if (window.speechSynthesis.speaking) {
-          window.speechSynthesis.pause()
-          window.speechSynthesis.resume()
-        }
-      }, 10000)
+      // Chrome-only keepalive: speechSynthesis silently stops after ~15s on Chrome.
+      // Do NOT apply on Safari/iOS — pause()+resume() restarts the utterance there.
+      const isChrome = /Chrome/.test(navigator.userAgent) && !/Edg|OPR|Safari/.test(navigator.userAgent)
+      if (isChrome) {
+        ttsKeepaliveRef.current = setInterval(() => {
+          if (window.speechSynthesis.speaking) {
+            window.speechSynthesis.pause()
+            window.speechSynthesis.resume()
+          }
+        }, 10000)
+      }
     }
 
     // Voices may not be loaded yet (Chrome loads async)
@@ -202,6 +190,23 @@ export default function Interview() {
       setTimeout(doSpeak, 500)
     }
   }, [])
+
+  useEffect(() => {
+    if (questionsRef.current.length === 0) return
+    transcriptRef.current = ''
+    setTranscript('')
+    const q = questionsRef.current[currentIndex]
+    speakThenRecord(q?.voice_text || q?.question || '')
+  }, [currentIndex, speakThenRecord])
+
+  useEffect(() => {
+    if (questions.length > 0 && currentIndex === 0) {
+      transcriptRef.current = ''
+      setTranscript('')
+      const q = questions[0]
+      speakThenRecord(q?.voice_text || q?.question || '')
+    }
+  }, [questions.length, speakThenRecord])
 
   const replayQuestion = () => {
     const q = questionsRef.current[currentIndexRef.current]
@@ -233,6 +238,10 @@ export default function Interview() {
       const t = Array.from(e.results).map(r => r[0].transcript).join(' ')
       transcriptRef.current = t
       setTranscript(t)
+      // Always keep the latest answer for this question, regardless of how the session ends
+      if (t.trim()) {
+        questionAnswersRef.current[currentIndexRef.current] = t
+      }
     }
     r.onend = () => {
       if (recognitionRef.current === r) {
@@ -258,8 +267,26 @@ export default function Interview() {
     const q = questionsRef.current[idx]
     if (!q) return
     const marker = `[Q${idx + 1}: ${q.question}]\n`
-    const answer = skipped ? '[SKIPPED]\n' : `${answerText.trim() || '(no answer)'}\n`
+    // Prefer the live-accumulated answer over the point-in-time capture
+    const bestAnswer = skipped ? '[SKIPPED]' : (questionAnswersRef.current[idx] || answerText || '').trim() || '(no answer)'
+    const answer = `${bestAnswer}\n`
     fullTranscriptRef.current += `${marker}${answer}\n`
+    // Mark this question as committed so we don't double-count it
+    if (!skipped) delete questionAnswersRef.current[idx]
+  }
+
+  // Build full transcript from any uncommitted answers still in questionAnswersRef
+  const buildFinalTranscript = () => {
+    const qs = questionsRef.current
+    // Commit any remaining uncommitted answers
+    qs.forEach((q, idx) => {
+      if (questionAnswersRef.current[idx] !== undefined) {
+        const marker = `[Q${idx + 1}: ${q.question}]\n`
+        fullTranscriptRef.current += `${marker}${questionAnswersRef.current[idx].trim()}\n\n`
+        delete questionAnswersRef.current[idx]
+      }
+    })
+    return fullTranscriptRef.current
   }
 
   const advance = () => {
@@ -272,9 +299,10 @@ export default function Interview() {
   }
 
   const nextQuestion = () => {
+    const answer = transcriptRef.current  // capture before stop clears it
     cancelSpeech()
     stopRecording()
-    commitToTranscript(transcriptRef.current, false)
+    commitToTranscript(answer, false)
     advance()
   }
 
@@ -286,14 +314,16 @@ export default function Interview() {
   }
 
   const finish = useCallback(async () => {
+    const answer = transcriptRef.current  // capture before stop clears it
     clearInterval(timerRef.current)
     cancelSpeech()
     stopRecording()
-    commitToTranscript(transcriptRef.current, false)
+    commitToTranscript(answer, false)
+    const fullTranscript = buildFinalTranscript()
     setFinishing(true)
     try {
       await axios.post(`${API}/api/interview/session/${sessionId}/complete`, {
-        full_transcript: fullTranscriptRef.current,
+        full_transcript: fullTranscript,
         questions: questionsRef.current,
       })
     } catch (e) { console.error(e) }
