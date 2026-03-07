@@ -234,16 +234,30 @@ export default function Interview() {
     ttsCancelRef.current = false
     const gen = ++ttsGenRef.current  // capture this call's generation
 
+    console.log('[speakThenRecord] q:', currentIndexRef.current,
+      '| gen:', gen,
+      '| cached:', !!prefetchedAudioMapRef.current[currentIndexRef.current],
+      '| audio_url:', questionsRef.current[currentIndexRef.current]?.audio_url)
+
     // Use pre-fetched audio if available (Q0 is pre-fetched during instructions screen)
     const playBlob = (blobUrl) => {
       if (ttsGenRef.current !== gen || finishedRef.current) { URL.revokeObjectURL(blobUrl); return }
       const audio = new Audio(blobUrl)
       audioRef.current = audio
-      const done = () => {
+      const done = (evt) => {
+        console.log('[TTS] done fired via', evt?.type, '| gen match:', ttsGenRef.current === gen)
+        audio.onended = null  // one-shot: prevent double-fire if both onended + onerror fire
+        audio.onerror = null
         URL.revokeObjectURL(blobUrl)
         audioRef.current = null
         setIsSpeaking(false)
-        if (ttsGenRef.current === gen && !finishedRef.current) startRecording()
+        // Small delay: gives mobile Chrome time to release audio resources
+        // before switching to mic input. Fixes "mic doesn't start on Q2+" on mobile.
+        if (ttsGenRef.current === gen && !finishedRef.current) {
+          setTimeout(() => {
+            if (ttsGenRef.current === gen && !finishedRef.current) startRecording()
+          }, 300)
+        }
       }
       audio.onended = done
       audio.onerror = done
@@ -320,8 +334,9 @@ export default function Interview() {
     if (!q) return
     // Guard: only speak each question index once. Prevents re-triggering when
     // `questions` state updates mid-interview (API fetch completing after start).
-    if (spokenIndexRef.current === currentIndex) return
+    if (spokenIndexRef.current === currentIndex) { console.log('[speak effect] skipped re-fire for q:', currentIndex); return }
     spokenIndexRef.current = currentIndex
+    console.log('[speak effect] firing for q:', currentIndex)
     transcriptRef.current = ''
     setTranscript('')
     speakThenRecord(q?.voice_text || q?.question || '')
@@ -345,8 +360,10 @@ export default function Interview() {
 
   const startRecording = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SR) return
+    if (!SR) { console.log('[SR] no SR support'); return }
     if (recognitionRef.current) {
+      console.log('[SR] stopping existing instance before restart')
+      recognitionRef.current.onresult = null
       recognitionRef.current.onend = null
       try { recognitionRef.current.stop() } catch (_) {}
       recognitionRef.current = null
@@ -358,19 +375,37 @@ export default function Interview() {
       const t = Array.from(e.results).map(r => r[0].transcript).join(' ')
       transcriptRef.current = t
       setTranscript(t)
-      // Always keep the latest answer for this question, regardless of how the session ends
       if (t.trim()) {
         questionAnswersRef.current[currentIndexRef.current] = t
       }
     }
-    r.onend = () => {
-      if (recognitionRef.current === r) {
-        try { r.start() } catch (_) {}
+    r.onerror = (e) => {
+      console.log('[SR] onerror:', e.error, '| q:', currentIndexRef.current)
+      // On aborted/network errors, mark this instance as dead and respawn via onend
+      if (e.error === 'aborted' || e.error === 'network') {
+        if (recognitionRef.current === r) recognitionRef.current = null
       }
     }
-    r.start()
-    recognitionRef.current = r
-    setIsRecording(true)
+    r.onend = () => {
+      console.log('[SR] onend | still active:', recognitionRef.current === r, '| q:', currentIndexRef.current)
+      if (recognitionRef.current === r) {
+        // Spawn a completely fresh SR instance — reusing the same object after stop()
+        // can cause InvalidStateError on mobile Chrome when the previous session
+        // hasn't fully released the mic.
+        recognitionRef.current = null
+        setTimeout(() => {
+          if (!finishedRef.current) startRecording()
+        }, 150)
+      }
+    }
+    console.log('[SR] starting for q:', currentIndexRef.current)
+    try {
+      r.start()
+      recognitionRef.current = r
+      setIsRecording(true)
+    } catch (err) {
+      console.log('[SR] start() threw:', err.message)
+    }
   }
 
   const stopRecording = () => {
