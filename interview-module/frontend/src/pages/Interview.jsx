@@ -139,14 +139,21 @@ export default function Interview() {
     questions.forEach((_, idx) => prefetchOne(idx))
 
     return () => {
+      // Only cancel in-flight fetches — do NOT revoke blob URLs here.
+      // Blobs are revoked individually in playBlob's onended/onerror/catch handlers,
+      // and any remaining are cleaned up on component unmount below.
       cancelled = true
-      // Revoke any cached blobs to free memory
+    }
+  }, [introPhase, questions])
+
+  // Revoke any un-played cached blobs when the component unmounts
+  useEffect(() => {
+    return () => {
       Object.values(prefetchedAudioMapRef.current).forEach(url => {
         try { URL.revokeObjectURL(url) } catch (_) {}
       })
-      prefetchedAudioMapRef.current = {}
     }
-  }, [introPhase, questions])
+  }, [])
 
   // "Start Interview" tap — this IS the user gesture that unlocks iOS audio autoplay
   const handleStart = () => setIntroPhase('started')

@@ -765,6 +765,8 @@ Experience: 5 years of relevant industry experience.`;
           seniority_bar: screeningConfig.seniority,
           time_limit: screeningConfig.time_limit,
           num_questions: screeningConfig.num_questions,
+          job_id: job.id,
+          behavioral_pct: screeningConfig.behavioral_pct ?? 20,
         }),
       });
       const { session_id } = await res.json();
