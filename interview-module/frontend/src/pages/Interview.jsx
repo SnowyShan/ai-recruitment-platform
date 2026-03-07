@@ -464,16 +464,27 @@ export default function Interview() {
     clearInterval(timerRef.current)
     cancelSpeech()
     const idx = currentIndexRef.current
-    const blob = await stopRecording()
-    const text = await transcribeBlob(blob)
-    transcriptsRef.current[idx] = text
 
-    // Build full transcript from all per-question transcripts
+    // Only transcribe if this question hasn't already been handled.
+    // nextQuestion() on the final question transcribes + stores BEFORE calling
+    // advance() → finish(), so we must not overwrite it with a second empty call.
+    if (transcriptsRef.current[idx] === undefined) {
+      const blob = await stopRecording()
+      const text = await transcribeBlob(blob)
+      transcriptsRef.current[idx] = text
+    } else {
+      // Ensure any lingering MediaRecorder is cleaned up (safety)
+      await stopRecording()
+    }
+
+    // Build full transcript — every question, in order.
+    // Unvisited questions (user ended early) → '(no answer)'
+    // Skipped questions → '[SKIPPED]'
     const qs = questionsRef.current
     let fullTranscript = ''
     qs.forEach((q, i) => {
       const ans = transcriptsRef.current[i]
-      fullTranscript += `[Q${i + 1}: ${q.question}]\n${ans || '(no answer)'}\n\n`
+      fullTranscript += `[Q${i + 1}: ${q.question}]\n${ans ?? '(no answer)'}\n\n`
     })
 
     setFinishing(true)
