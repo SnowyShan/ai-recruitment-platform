@@ -94,6 +94,9 @@ async def create_screening(
     if in_progress:
         raise HTTPException(status_code=400, detail="An interview is currently in progress for this candidate")
 
+    # Resolve job now so we can check setup_status
+    job = application.job
+
     # Block if job questions are still being generated
     if job.setup_status == "generating":
         raise HTTPException(
@@ -105,7 +108,6 @@ async def create_screening(
     _invalidate_pending_tokens(db, screening_data.application_id)
 
     # Create interview session in interview module
-    job = application.job
     job_desc = job.description or ""
     resume_text = application.candidate.resume_text or ""
     session_id = _create_interview_session(
