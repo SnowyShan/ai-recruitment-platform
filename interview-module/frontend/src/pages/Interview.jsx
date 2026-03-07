@@ -38,44 +38,33 @@ export default function Interview() {
 
   const [questions, setQuestions] = useState(state?.questions || [])
   const [currentIndex, setCurrentIndex] = useState(0)
-  const [transcript, setTranscript] = useState('')
   const [isRecording, setIsRecording] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
   const [timeLeft, setTimeLeft] = useState((state?.timeLimit || 45) * 60)
   const [finishing, setFinishing] = useState(false)
   const [isWrapUp, setIsWrapUp] = useState(false)
   const isWrapUpRef = useRef(false)
-  const [finishing2, setFinishing2] = useState(false)
 
   const [searchParams] = useSearchParams()
   const [tokenError, setTokenError] = useState(null)
   const [tokenChecked, setTokenChecked] = useState(false)
   const tokenRef = useRef(searchParams.get('token'))
 
-  const recognitionRef = useRef(null)
   const timerRef = useRef(null)
-  const transcriptRef = useRef('')
-  const fullTranscriptRef = useRef('')
-  const questionAnswersRef = useRef({}) // live per-question answer map, updated on every onresult
-  const committedRef = useRef(new Set()) // question indices already written to fullTranscriptRef
   const finishRef = useRef(null)
   const currentIndexRef = useRef(0)
   const questionsRef = useRef(questions)
+  const finishedRef = useRef(false)
 
   // Guard: track which question index we've already initiated speaking for.
-  // Prevents the speak effect from re-triggering when `questions` state arrives
-  // from the API mid-interview (candidates who open via direct URL with no state).
   const spokenIndexRef = useRef(-1)
 
-  // iOS detection: Chrome iOS and Safari iOS both use WebKit — Web Speech API
-  // recognition is unavailable. Use MediaRecorder + Whisper instead.
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream
-  const hasNativeSR = !!(window.SpeechRecognition || window.webkitSpeechRecognition) && !isIOS
-
-  // Whisper/MediaRecorder state (used when hasNativeSR is false)
+  // MediaRecorder + Whisper — used on all platforms
+  const micStreamRef = useRef(null)       // persistent mic stream, acquired once on grant
   const mediaRecorderRef = useRef(null)
   const audioChunksRef = useRef([])
   const audioMimeTypeRef = useRef('audio/webm')
-  const [isTranscribing, setIsTranscribing] = useState(false)
+  const transcriptsRef = useRef({})       // keyed by question index, populated after each Whisper call
 
   // TTS state
   const [ttsEnabled, setTtsEnabled] = useState(getTTSEnabled)
@@ -118,10 +107,18 @@ export default function Interview() {
     setIntroPhase('granting')
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      stream.getTracks().forEach(t => t.stop())
-    } catch (_) {}  // denied — Web Speech API fallback will handle it
+      micStreamRef.current = stream  // keep alive for entire interview — no repeated permission prompts
+    } catch (_) {}  // denied gracefully — getUserMedia will re-prompt on first recording
     setIntroPhase('ready')
   }
+
+  // Release mic stream on unmount
+  useEffect(() => {
+    return () => {
+      micStreamRef.current?.getTracks().forEach(t => t.stop())
+      micStreamRef.current = null
+    }
+  }, [])
 
   // Pre-fetch audio for ALL questions while user reads instructions.
   // Questions with audio_url (pre-generated on server) are fetched from there;
@@ -216,7 +213,6 @@ export default function Interview() {
 
   const audioRef = useRef(null)   // current playing HTMLAudioElement
   const ttsGenRef = useRef(0)     // incremented on every cancel — stale axios responses self-discard
-  const finishedRef = useRef(false) // set true after finish() — blocks any further audio/recording
 
   const cancelSpeech = () => {
     ttsGenRef.current++            // invalidate any in-flight TTS requests
@@ -345,20 +341,18 @@ export default function Interview() {
     if (!q) return
     // Guard: only speak each question index once. Prevents re-triggering when
     // `questions` state updates mid-interview (API fetch completing after start).
-    if (spokenIndexRef.current === currentIndex) { console.log('[speak effect] skipped re-fire for q:', currentIndex); return }
+    if (spokenIndexRef.current === currentIndex) return
     spokenIndexRef.current = currentIndex
-    console.log('[speak effect] firing for q:', currentIndex)
-    transcriptRef.current = ''
-    setTranscript('')
     speakThenRecord(q?.voice_text || q?.question || '')
   }, [currentIndex, questions, speakThenRecord, micReady, started])
 
-  const replayQuestion = () => {
+  const replayQuestion = async () => {
     const q = questionsRef.current[currentIndexRef.current]
     if (!q) return
     cancelSpeech()
-    stopRecording()
-    spokenIndexRef.current = -1  // allow replay to re-trigger the speak guard
+    await stopRecording()        // discard recording — user is starting over
+    audioChunksRef.current = []  // ensure clean slate
+    spokenIndexRef.current = -1  // allow speak effect to re-trigger
     speakThenRecord(q.voice_text || q.question)
   }
 
@@ -367,104 +361,60 @@ export default function Interview() {
     setTtsEnabled(v => !v)
   }
 
-  // ── Recording ─────────────────────────────────────────────────────────────
+  // ── Recording (MediaRecorder + Whisper on all platforms) ─────────────────
 
-  const startRecording = () => {
-    if (hasNativeSR) {
-      // ── Web Speech API path (Chrome desktop, Android Chrome, Mac Safari) ──
-      const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-      if (recognitionRef.current) {
-        recognitionRef.current.onresult = null
-        recognitionRef.current.onend = null
-        try { recognitionRef.current.stop() } catch (_) {}
-        recognitionRef.current = null
+  const startRecording = async () => {
+    if (finishedRef.current) return
+    try {
+      // Reuse persistent stream if alive; re-acquire if not
+      let stream = micStreamRef.current
+      if (!stream || stream.getTracks().some(t => t.readyState === 'ended')) {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        micStreamRef.current = stream
       }
-      const r = new SR()
-      r.continuous = true
-      r.interimResults = true
-      r.onresult = e => {
-        const t = Array.from(e.results).map(r => r[0].transcript).join(' ')
-        transcriptRef.current = t
-        setTranscript(t)
-        if (t.trim()) {
-          questionAnswersRef.current[currentIndexRef.current] = t
-        }
-      }
-      r.onerror = (e) => {
-        console.log('[SR] onerror:', e.error)
-        if (e.error === 'aborted' || e.error === 'network') {
-          if (recognitionRef.current === r) recognitionRef.current = null
-        }
-      }
-      r.onend = () => {
-        if (recognitionRef.current === r) {
-          recognitionRef.current = null
-          setTimeout(() => { if (!finishedRef.current) startRecording() }, 150)
-        }
-      }
-      try {
-        r.start()
-        recognitionRef.current = r
-        setIsRecording(true)
-      } catch (err) {
-        console.log('[SR] start failed:', err.message)
-      }
-    } else {
-      // ── MediaRecorder + Whisper path (iOS Safari, Chrome iOS) ─────────────
-      navigator.mediaDevices.getUserMedia({ audio: true })
-        .then(stream => {
-          const mimeType = MediaRecorder.isTypeSupported('audio/mp4')  ? 'audio/mp4'
-                         : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
-                         : ''
-          audioMimeTypeRef.current = mimeType || 'audio/webm'
-          audioChunksRef.current = []
-          const mr = new MediaRecorder(stream, mimeType ? { mimeType } : {})
-          mr.ondataavailable = e => { if (e.data?.size > 0) audioChunksRef.current.push(e.data) }
-          mr.start(1000)
-          mediaRecorderRef.current = mr
-          setIsRecording(true)
-        })
-        .catch(err => { console.log('[Whisper] mic denied:', err.message); setIsRecording(false) })
-    }
-  }
-
-  // Returns a Promise<Blob|null>. On Web Speech API path returns null immediately.
-  const stopRecording = () => {
-    if (hasNativeSR) {
-      if (recognitionRef.current) {
-        recognitionRef.current.onresult = null
-        recognitionRef.current.onend = null
-        try { recognitionRef.current.stop() } catch (_) {}
-        recognitionRef.current = null
-      }
+      const mimeType = MediaRecorder.isTypeSupported('audio/mp4')  ? 'audio/mp4'
+                     : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
+                     : ''
+      audioMimeTypeRef.current = mimeType || 'audio/webm'
+      audioChunksRef.current = []
+      const mr = new MediaRecorder(stream, mimeType ? { mimeType } : {})
+      mr.ondataavailable = e => { if (e.data?.size > 0) audioChunksRef.current.push(e.data) }
+      mr.start(1000)
+      mediaRecorderRef.current = mr
+      setIsRecording(true)
+    } catch (err) {
+      console.log('[Recording] failed to start:', err.message)
       setIsRecording(false)
-      return Promise.resolve(null)
-    } else {
-      return new Promise(resolve => {
-        const mr = mediaRecorderRef.current
-        if (!mr) { setIsRecording(false); resolve(null); return }
-        mr.onstop = () => {
-          mr.stream?.getTracks().forEach(t => t.stop())
-          mediaRecorderRef.current = null
-          setIsRecording(false)
-          const chunks = audioChunksRef.current
-          audioChunksRef.current = []
-          if (!chunks.length) { resolve(null); return }
-          resolve(new Blob(chunks, { type: audioMimeTypeRef.current }))
-        }
-        try { mr.stop() } catch (_) { setIsRecording(false); resolve(null) }
-      })
     }
   }
 
-  // Send recorded blob to Whisper and return transcript text
+  // Stops current recording. Returns Promise<Blob|null>.
+  const stopRecording = () => new Promise(resolve => {
+    const mr = mediaRecorderRef.current
+    if (!mr || mr.state === 'inactive') {
+      setIsRecording(false)
+      resolve(null)
+      return
+    }
+    mr.onstop = () => {
+      // Note: we do NOT stop stream tracks here — micStreamRef stays alive for next question
+      mediaRecorderRef.current = null
+      setIsRecording(false)
+      const chunks = audioChunksRef.current
+      audioChunksRef.current = []
+      resolve(chunks.length ? new Blob(chunks, { type: audioMimeTypeRef.current }) : null)
+    }
+    try { mr.stop() } catch (_) { setIsRecording(false); resolve(null) }
+  })
+
+  // Send blob to Whisper, return transcript text. Retries once on empty.
   const transcribeBlob = async (blob) => {
     if (!blob) return ''
     const ext = audioMimeTypeRef.current.includes('mp4') ? 'm4a' : 'webm'
     const doRequest = async () => {
-      const formData = new FormData()
-      formData.append('file', blob, `audio.${ext}`)
-      const res = await axios.post(`${API}/api/interview/transcribe`, formData, {
+      const fd = new FormData()
+      fd.append('file', blob, `audio.${ext}`)
+      const res = await axios.post(`${API}/api/interview/transcribe`, fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       return res.data.text || ''
@@ -472,102 +422,65 @@ export default function Interview() {
     try {
       setIsTranscribing(true)
       let text = await doRequest()
-      // Retry once on empty result (transient Whisper issue)
       if (!text.trim()) {
-        await new Promise(r => setTimeout(r, 1000))
+        await new Promise(r => setTimeout(r, 800))
         text = await doRequest()
       }
       return text
     } catch (err) {
-      console.log('[Whisper] transcription failed:', err.message)
+      console.log('[Whisper] transcription error:', err.message)
       return ''
     } finally {
       setIsTranscribing(false)
     }
   }
 
-  const commitToTranscript = (answerText, skipped = false) => {
-    const idx = currentIndexRef.current
-    // Guard: never commit the same question index twice.
-    // Web Speech API .stop() is async — onresult can fire after stopRecording(),
-    // re-populating questionAnswersRef[idx] after we already committed it.
-    if (committedRef.current.has(idx)) return
-    const q = questionsRef.current[idx]
-    if (!q) return
-    committedRef.current.add(idx)
-    const marker = `[Q${idx + 1}: ${q.question}]\n`
-    // Prefer the live-accumulated answer over the point-in-time capture
-    const bestAnswer = skipped ? '[SKIPPED]' : (questionAnswersRef.current[idx] || answerText || '').trim() || '(no answer)'
-    const answer = `${bestAnswer}\n`
-    fullTranscriptRef.current += `${marker}${answer}\n`
-    delete questionAnswersRef.current[idx]
-  }
-
-  // Build full transcript from any uncommitted answers still in questionAnswersRef
-  const buildFinalTranscript = () => {
-    const qs = questionsRef.current
-    // Commit any remaining uncommitted answers (questions not yet advanced through)
-    qs.forEach((q, idx) => {
-      if (committedRef.current.has(idx)) return  // already committed — skip
-      if (questionAnswersRef.current[idx] !== undefined) {
-        committedRef.current.add(idx)
-        const marker = `[Q${idx + 1}: ${q.question}]\n`
-        fullTranscriptRef.current += `${marker}${questionAnswersRef.current[idx].trim()}\n\n`
-        delete questionAnswersRef.current[idx]
-      }
-    })
-    return fullTranscriptRef.current
-  }
-
   const advance = () => {
     const idx = currentIndexRef.current
     const qs = questionsRef.current
-    transcriptRef.current = ''
-    setTranscript('')
     if (idx + 1 >= qs.length) finishRef.current?.()
     else setCurrentIndex(idx + 1)
   }
 
   const nextQuestion = async () => {
     cancelSpeech()
-    let answer = transcriptRef.current
+    const idx = currentIndexRef.current
     const blob = await stopRecording()
-    if (blob) {
-      answer = await transcribeBlob(blob)
-      transcriptRef.current = answer
-      setTranscript(answer)
-      if (answer.trim()) questionAnswersRef.current[currentIndexRef.current] = answer
-    }
-    commitToTranscript(answer, false)
+    const text = await transcribeBlob(blob)
+    transcriptsRef.current[idx] = text
     advance()
   }
 
   const skip = async () => {
     cancelSpeech()
-    const blob = await stopRecording()
-    if (blob) await transcribeBlob(blob) // discard — skipped
-    commitToTranscript('', true)
+    const idx = currentIndexRef.current
+    await stopRecording()  // discard audio
+    transcriptsRef.current[idx] = '[SKIPPED]'
     advance()
   }
 
   const finish = useCallback(async () => {
     finishedRef.current = true
-    let answer = transcriptRef.current
     clearInterval(timerRef.current)
     cancelSpeech()
+    const idx = currentIndexRef.current
     const blob = await stopRecording()
-    if (blob) {
-      answer = await transcribeBlob(blob)
-      transcriptRef.current = answer
-      if (answer.trim()) questionAnswersRef.current[currentIndexRef.current] = answer
-    }
-    commitToTranscript(answer, false)
-    const fullTranscript = buildFinalTranscript()
+    const text = await transcribeBlob(blob)
+    transcriptsRef.current[idx] = text
+
+    // Build full transcript from all per-question transcripts
+    const qs = questionsRef.current
+    let fullTranscript = ''
+    qs.forEach((q, i) => {
+      const ans = transcriptsRef.current[i]
+      fullTranscript += `[Q${i + 1}: ${q.question}]\n${ans || '(no answer)'}\n\n`
+    })
+
     setFinishing(true)
     try {
       await axios.post(`${API}/api/interview/session/${sessionId}/complete`, {
         full_transcript: fullTranscript,
-        questions: questionsRef.current,
+        questions: qs,
       })
     } catch (e) { console.error(e) }
     if (tokenRef.current) {
@@ -623,7 +536,7 @@ export default function Interview() {
             </li>
             <li className="flex gap-3">
               <span className="text-2xl leading-none">💬</span>
-              <span><strong className="text-slate-800">{numQuestions} questions.</strong> Each question is read aloud. Answer by speaking — your response is transcribed automatically.</span>
+              <span><strong className="text-slate-800">{numQuestions} questions.</strong> Each question is read aloud. Speak your answer — tap <strong className="text-slate-800">Next</strong> when done and your response is saved automatically.</span>
             </li>
             <li className="flex gap-3">
               <span className="text-2xl leading-none">⏭</span>
@@ -751,35 +664,25 @@ export default function Interview() {
         </div>
         <p className="text-base sm:text-lg font-medium text-slate-800 leading-relaxed">{q.question}</p>
         {isSpeaking && (
-          <p className="text-xs text-slate-400 mt-3 italic">Listening starts automatically after the question is read…</p>
+          <p className="text-xs text-slate-400 mt-3 italic">Recording starts automatically when the question finishes…</p>
         )}
       </div>
 
-      {/* Transcript box */}
-      <div className="card p-4 mb-4 flex-1 min-h-32">
-        {isTranscribing ? (
-          <p className="text-slate-400 text-sm italic flex items-center gap-2">
-            <span className="inline-block w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
-            Transcribing your answer…
-          </p>
-        ) : transcript ? (
-          <p className="text-slate-700 text-sm leading-relaxed">{transcript}</p>
-        ) : (
-          <p className="text-slate-400 text-sm italic">
-            {isRecording
-              ? hasNativeSR ? 'Listening… speak your answer' : '🎙 Recording… tap Next when done'
-              : 'Microphone inactive'}
-          </p>
-        )}
-      </div>
+      {/* Transcribing status — shown briefly between questions while Whisper processes */}
+      {isTranscribing && (
+        <div className="card p-4 mb-4 flex items-center gap-3 text-slate-500 text-sm">
+          <span className="inline-block w-2 h-2 rounded-full bg-indigo-400 animate-pulse flex-shrink-0" />
+          Processing your answer…
+        </div>
+      )}
 
       {/* Controls */}
       <div className="flex gap-2 sm:gap-3 mt-2">
-        <button onClick={nextQuestion} disabled={isTranscribing}
+        <button onClick={nextQuestion} disabled={isTranscribing || isSpeaking}
           className="btn btn-primary flex-1 text-sm sm:text-base py-3 disabled:opacity-50">
           {currentIndex + 1 >= questions.length ? 'Finish' : 'Next →'}
         </button>
-        <button onClick={skip} disabled={isTranscribing}
+        <button onClick={skip} disabled={isTranscribing || isSpeaking}
           className="btn btn-secondary px-4 sm:px-5 text-sm py-3 disabled:opacity-50">
           Skip
         </button>
