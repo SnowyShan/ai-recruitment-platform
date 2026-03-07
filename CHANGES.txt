@@ -1,0 +1,564 @@
+================================================================
+  TALENTBRIDGE — WHAT'S NEW & HOW IT WORKS
+  (Changes since commit ae993ab)
+  Written for: beginners / new contributors
+================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART 1 — FEATURES IMPLEMENTED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+─────────────────────────────────────────────────────────────
+  FEATURE 1: VOICE INTERVIEWS (AI reads questions out loud)
+─────────────────────────────────────────────────────────────
+
+What it does:
+  When a candidate starts an interview, each question is spoken
+  aloud by an AI voice instead of just appearing as text on screen.
+  The candidate answers by speaking. Their answer is automatically
+  transcribed into text in real time.
+
+Why it matters:
+  This makes the interview feel much more natural — like a real
+  phone screen. Candidates don't have to type their answers, and
+  recruiters get a word-for-word transcript of what was said.
+
+How it was built (in order):
+  Phase 1 — The browser reads questions using the device's
+             built-in text-to-speech (same voice as screen readers).
+             A mute button and a "replay question" button were added.
+
+  Phase 2 — Questions are now spoken using OpenAI's TTS API
+             (a paid service that produces a much more natural,
+             professional-sounding voice called "nova"). The browser
+             built-in voice is kept as a fallback if OpenAI fails.
+
+  Phase 3 — Audio files for technical questions are now generated
+             ONCE when a job is created, stored on the server, and
+             reused for every candidate. This means the interview
+             starts faster and costs less (audio isn't re-generated
+             per candidate). Behavioral questions are still generated
+             fresh per candidate because they're tailored to the
+             specific resume.
+
+
+─────────────────────────────────────────────────────────────
+  FEATURE 2: PRE-BUILT QUESTION BANK PER JOB
+─────────────────────────────────────────────────────────────
+
+What it does:
+  When a recruiter creates a job, TalentBridge automatically
+  generates a set of technical interview questions for that job
+  in the background. By the time the recruiter wants to send an
+  interview invite, the questions (and their audio) are already
+  ready to go.
+
+Why it matters:
+  Previously, question generation happened when a candidate
+  clicked the interview link — meaning each candidate waited
+  several seconds while Claude generated questions on the fly.
+  Now it's instant.
+
+  Also: every candidate for the same job gets the same set of
+  technical questions, making it easier to compare answers fairly.
+
+Details:
+  - Questions are split into two types:
+      Technical  → domain-specific (e.g. "Explain Swift optionals")
+                   pre-generated once, reused for all candidates
+      Behavioral → resume-specific (e.g. "Tell me about a time you
+                   led a team") — generated fresh per candidate
+                   so they're relevant to that person's experience
+
+  - The recruiter can set the behavioral percentage (default: 20%).
+    So for 8 questions, that's ~2 behavioral + 6 technical.
+
+  - The job's domain (iOS, backend, data science, etc.) is inferred
+    automatically from the job title.
+
+  - While questions are being generated, the job cannot be published
+    or interview invites sent. A progress bar is shown in JobDetail.
+
+
+─────────────────────────────────────────────────────────────
+  FEATURE 3: PRE-INTERVIEW INSTRUCTIONS SCREEN
+─────────────────────────────────────────────────────────────
+
+What it does:
+  Before the interview starts, candidates see a screen that explains:
+    - How long the interview will take
+    - How many questions there are
+    - How to use the interface (speak clearly, use Next/Skip, etc.)
+  They click "Allow Microphone & Continue" to grant mic access,
+  then "Tap to Begin" to start.
+
+Why it matters:
+  Previously the interview started immediately and the browser would
+  pop up a mic permission dialog mid-flow, which was jarring.
+  On iOS, this two-step approach also solves an audio autoplay
+  restriction: the browser requires a user tap before it will play
+  audio, and "Tap to Begin" acts as that tap.
+
+  While the candidate reads the instructions, the audio for the
+  first question is silently pre-fetched in the background, so
+  it plays instantly when they begin.
+
+
+─────────────────────────────────────────────────────────────
+  FEATURE 4: MOCK INTERVIEW BUTTON
+─────────────────────────────────────────────────────────────
+
+What it does:
+  Recruiters can now click a "Mock Interview" button in the
+  JobDetail page (inside Screening Config) to instantly launch a
+  test interview for themselves — no need to create a fake
+  candidate or send an email invite.
+
+Why it matters:
+  Makes it easy to preview and QA the interview experience before
+  sending it to real candidates. The mock uses the real question
+  bank for the job, so it's an accurate preview.
+
+
+─────────────────────────────────────────────────────────────
+  FEATURE 5: FULLY MOBILE-RESPONSIVE UI
+─────────────────────────────────────────────────────────────
+
+What it does:
+  The entire TalentBridge app (dashboard, jobs list, job detail,
+  interview module) now works properly on phones and tablets.
+
+  Key changes:
+    - Sidebar becomes a slide-in drawer on mobile with a hamburger
+      menu button and a backdrop overlay
+    - All grids stack vertically on small screens
+    - Buttons and text scale down appropriately
+    - The interview page has tighter padding and larger touch targets
+
+Why it matters:
+  Candidates often take interviews on their phones. This makes the
+  experience usable on any device.
+
+
+─────────────────────────────────────────────────────────────
+  FEATURE 6: SAFARI & iOS COMPATIBILITY
+─────────────────────────────────────────────────────────────
+
+What it does:
+  The interview module now works correctly on Safari (desktop and
+  iPhone/iPad). Previously it crashed or produced garbled transcripts
+  on Apple devices.
+
+Why it matters:
+  A significant portion of users — especially on mobile — use Safari.
+  Without this, the product was effectively broken for iPhone users.
+
+What was fixed:
+  - A crash on load (caused by JavaScript declaration order in
+    the production build — a known React 18.3 Safari bug, fixed by
+    downgrading to React 18.2)
+  - Audio doubling: pressing "Next" while a question was still
+    speaking would result in two voices playing at once
+  - Audio playing after the interview ended
+  - The microphone keepalive trick (pause/resume) that keeps
+    Chrome's speech recognition alive was causing Safari to restart
+    the audio from the beginning — fixed by detecting the browser
+    and skipping the keepalive on Safari/iOS
+  - Transcript race condition: sometimes the last spoken answer
+    wasn't captured because the microphone was stopped before the
+    browser finished writing the final result
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PART 2 — TECHNICAL DETAILS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+─────────────────────────────────────────────────────────────
+  OVERALL ARCHITECTURE
+─────────────────────────────────────────────────────────────
+
+TalentBridge is made up of TWO separate applications that talk
+to each other:
+
+  ┌──────────────────────────────────────────────────────┐
+  │  TalentBridge (main app)                             │
+  │  Frontend:  http://localhost:5173  (React)           │
+  │  Backend:   http://localhost:8000  (Python/FastAPI)  │
+  │  Database:  talentbridge.db        (SQLite)          │
+  └────────────────────┬─────────────────────────────────┘
+                       │ talks to via HTTP
+  ┌────────────────────▼─────────────────────────────────┐
+  │  Interview Module (standalone microservice)          │
+  │  Frontend:  http://localhost:5174  (React)           │
+  │  Backend:   http://localhost:8001  (Python/FastAPI)  │
+  │  Database:  interview.db           (SQLite)          │
+  │  Audio:     interview-module/backend/audio/*.mp3     │
+  └──────────────────────────────────────────────────────┘
+
+The flow when a recruiter invites a candidate:
+  1. Recruiter clicks "Send Invite" in TalentBridge
+  2. TalentBridge backend calls Interview Module to create a session
+  3. Interview Module returns a session_id
+  4. TalentBridge generates a time-limited invite token and emails
+     it to the candidate
+  5. Candidate opens link → interview module frontend loads
+  6. Interview module validates the token against TalentBridge
+  7. Candidate completes interview
+  8. Interview module sends the transcript + report back to TalentBridge
+  9. Recruiter views the report in the JobDetail page
+
+
+─────────────────────────────────────────────────────────────
+  THIRD-PARTY APIs USED
+─────────────────────────────────────────────────────────────
+
+1. ANTHROPIC (Claude AI)
+   ─────────────────────
+   What it does: The "brain" of the system. Used for three things:
+     a) Generating interview questions from a job description + resume
+     b) Generating behavioral questions tailored to a specific resume
+     c) Evaluating the full transcript at the end and producing a
+        detailed report (scores, strengths, weaknesses, pass/fail)
+
+   Model used:
+     - claude-opus-4-5   for question generation + evaluation
+       (higher quality, used where accuracy matters most)
+     - claude-haiku-3-5  for lighter, faster tasks
+
+   Where in the code:
+     interview-module/backend/app/claude_client.py
+
+   Key functions:
+     generate_questions()          → technical questions from JD
+     generate_behavioral_questions() → resume-tailored behavioral Qs
+     generate_report_from_transcript() → full evaluation report
+
+   Cost note: Every interview evaluation is one API call with the
+   full transcript + all questions as input.
+
+
+2. OPENAI (Text-to-Speech)
+   ────────────────────────
+   What it does: Converts question text into spoken audio (mp3).
+
+   Model used: tts-1
+   Voice used: nova (sounds like a natural, professional speaker)
+
+   Two ways it's used:
+     a) At job creation time — generates audio for all technical
+        questions and saves the .mp3 files to disk (pre-generation)
+     b) At session start time — generates audio for behavioral
+        questions (which are different per candidate) and saves
+        per-session .mp3 files
+
+   Where in the code:
+     interview-module/backend/app/claude_client.py → generate_and_store_tts()
+     interview-module/backend/app/routers.py       → POST /api/interview/tts
+
+   Cost: ~$0.015 per 1,000 characters. A typical question is
+   ~100 characters, so ~$0.0015 per question. Negligible.
+
+
+3. GMAIL SMTP (Email)
+   ───────────────────
+   What it does: Sends interview invite emails to candidates.
+
+   How it works: TalentBridge uses a dedicated Gmail account
+   (talentbridgerecruiterai@gmail.com) with an App Password
+   configured in the backend .env file.
+
+   Where in the code:
+     backend/app/email_utils.py
+
+
+4. WEB SPEECH API (Browser built-in — no cost)
+   ─────────────────────────────────────────────
+   What it does: Two jobs —
+     a) Speech-to-Text: transcribes what the candidate says in
+        real time (used during the interview to capture answers)
+     b) Text-to-Speech: fallback voice if OpenAI TTS fails
+
+   Important limitation: Speech-to-Text only works in Chrome.
+   It does NOT work in Firefox or Safari. Replacing this with
+   OpenAI Whisper (server-side transcription) is planned for V3.
+
+   Where in the code:
+     interview-module/frontend/src/pages/Interview.jsx
+
+
+─────────────────────────────────────────────────────────────
+  HOW THE QUESTION BANK WORKS (step by step)
+─────────────────────────────────────────────────────────────
+
+This is the most complex new system. Here's exactly what happens:
+
+Step 1 — Recruiter creates a job
+  TalentBridge backend:
+    - Infers the domain from the job title
+      (e.g. "Senior iOS Engineer" → "ios")
+    - Sets setup_status = "generating" on the job record
+    - Makes an HTTP POST to Interview Module:
+        POST http://localhost:8001/api/interview/job/{id}/setup
+      passing job title, description, domain, difficulty, seniority,
+      and how many technical questions to generate
+
+Step 2 — Interview Module generates questions + audio
+  Interview Module backend:
+    - Calls Claude to generate N technical questions
+    - For each question, calls OpenAI TTS to generate an mp3 file
+    - Saves mp3 files to disk: interview-module/backend/audio/
+    - Stores questions in the "questions" table in interview.db
+    - Stores the list of question IDs + status in the "job_setup"
+      table (status goes: generating → ready)
+    - Updates progress_current as each question is processed
+
+Step 3 — TalentBridge polls for completion
+  JobDetail frontend polls GET /api/jobs/{id}/setup-status every 3s.
+  TalentBridge backend proxies this to Interview Module.
+  When status = "ready", the progress bar disappears and the
+  Publish button becomes active.
+
+Step 4 — Recruiter sends an invite
+  TalentBridge backend calls Interview Module to create a session.
+  Interview Module:
+    - Looks up the pre-built technical questions for this job
+    - Calls Claude to generate fresh behavioral questions for
+      THIS candidate's resume
+    - Calls OpenAI TTS for the behavioral questions
+    - Stores everything as a session, returns session_id
+
+Step 5 — Candidate takes the interview
+  Interview module frontend:
+    - Loads all questions
+    - Pre-fetches audio for ALL questions in parallel (using the
+      stored mp3 URLs for technical Qs, calling /tts API for
+      behavioral Qs)
+    - Plays each question via an HTML <audio> element
+    - Records the answer via Web Speech API
+    - Shows a live transcript as the candidate speaks
+
+Step 6 — Interview completes
+  The full transcript (all questions + all answers) is sent to
+  Claude in one batch call. Claude produces a report with:
+    - Per-question scores
+    - Strengths and weaknesses
+    - Overall pass/fail recommendation
+  This report is POSTed back to TalentBridge and stored.
+  The recruiter sees it in JobDetail under "View Report".
+
+
+─────────────────────────────────────────────────────────────
+  HOW THE TRANSCRIPT RELIABILITY WORKS
+─────────────────────────────────────────────────────────────
+
+This is subtle but important. The Web Speech API has a quirk:
+when you call .stop() to stop recording, it doesn't immediately
+stop — it's asynchronous. Results can still arrive AFTER you've
+called stop().
+
+The code handles this with two mechanisms:
+
+1. questionAnswersRef
+   A dictionary (object) keyed by question index that stores the
+   latest answer for each question, updated on EVERY result event
+   (not just at the end). This means even if the final result
+   arrives late, it's captured.
+
+2. committedRef
+   A Set of question indices that have already been written to the
+   final transcript. Once a question is committed, it can never be
+   committed again — even if a late result tries to write it twice.
+   This prevents duplicate questions in the final report.
+
+The flow for each question:
+  onresult fires → questionAnswersRef[idx] = latest transcript
+  User taps Next → capture answer from questionAnswersRef
+                 → mark idx as committed
+                 → write to fullTranscript
+  At interview end → sweep any uncommitted questions still in
+                     questionAnswersRef and flush them
+
+
+─────────────────────────────────────────────────────────────
+  HOW AUDIO PLAYBACK WORKS (generation counter pattern)
+─────────────────────────────────────────────────────────────
+
+When the user taps "Next" quickly, there can be multiple in-flight
+audio requests at once. The code uses a "generation counter" to
+make sure only the LATEST request actually plays:
+
+  ttsGenRef.current = 0  (starts at 0)
+
+  When speakThenRecord() is called:
+    - ttsGenRef.current++ (e.g. becomes 3)
+    - const gen = 3  (captured at this moment)
+    - makes the API call to /tts
+    - when the audio arrives: check if ttsGenRef.current === gen
+      if yes → play it
+      if no  → a newer request has since been made, discard this one
+
+  When cancelSpeech() is called:
+    - ttsGenRef.current++ (invalidates any in-flight request)
+    - stops and clears the currently playing audio element
+
+This means no matter how fast the user taps Next, only the most
+recent question's audio ever plays.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  GLOSSARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+API (Application Programming Interface)
+  A way for two programs to talk to each other. In this project,
+  TalentBridge and the Interview Module communicate via HTTP APIs
+  — one service calls a URL on the other service to share data.
+
+Async / Asynchronous
+  When a program starts a task and moves on without waiting for
+  it to finish. The task completes later and the program handles
+  the result when it's ready. The opposite is "synchronous" (wait
+  for it to finish before moving on).
+
+Backend
+  The server-side part of the application. It runs on a server,
+  handles business logic, stores data, and responds to requests
+  from the frontend. In this project, both backends are written
+  in Python using FastAPI.
+
+Behavioral Question
+  An interview question about past experience or soft skills.
+  Example: "Tell me about a time you disagreed with a teammate."
+  Contrast with technical questions which test hard skills.
+
+Blob URL
+  A temporary URL created in the browser that points to data stored
+  in memory (like an audio file). Created with URL.createObjectURL().
+  Must be cleaned up with URL.revokeObjectURL() when no longer needed,
+  otherwise it leaks memory.
+
+Claude (Anthropic)
+  An AI language model made by Anthropic. Like ChatGPT but built
+  by a different company. Used here to generate questions and
+  evaluate interview transcripts.
+
+Domain (job domain)
+  The technical area a job belongs to. Examples: "ios", "backend",
+  "data", "devops". Inferred from the job title to select
+  appropriate technical questions.
+
+FastAPI
+  A Python framework for building web APIs. It handles incoming
+  HTTP requests and routes them to the right Python function.
+  The "API" in the name reflects its strength in building APIs.
+
+Frontend
+  The part of the application that runs in the user's browser.
+  In this project, both frontends are built with React (JavaScript).
+
+HTTP / HTTP Request
+  The protocol browsers and servers use to communicate. When you
+  visit a website, your browser makes an HTTP GET request to a
+  server. When you submit a form, it makes an HTTP POST request.
+
+Microservice
+  A self-contained application that does one specific job and
+  communicates with other services via APIs. The Interview Module
+  is a microservice — it handles only interviews, nothing else.
+
+Migration (database migration)
+  Code that safely updates a database structure (e.g. adds a new
+  column) without destroying existing data. In this project,
+  migrations run on startup and use "ALTER TABLE ... ADD COLUMN"
+  statements that are silently skipped if the column already exists.
+
+MP3
+  A common audio file format. Pre-generated interview question
+  audio is stored as .mp3 files on the server.
+
+React
+  A JavaScript library for building user interfaces. The UI is
+  split into components (reusable pieces like buttons, cards, forms).
+  State (data that can change) is managed with useState and useRef.
+
+Ref (useRef in React)
+  A way to store a value in React that persists across renders but
+  doesn't cause a re-render when it changes. Used here for things
+  like the current audio element, generation counter, and transcript
+  accumulator — data that needs to be current immediately, not
+  after the next render cycle.
+
+Session (interview session)
+  A single candidate's interview run. Created when TalentBridge
+  sends an invite. Contains: the questions, the session_id, the
+  candidate's transcript, and (after completion) the evaluation
+  report. Stored in interview.db.
+
+SQLite
+  A simple database stored as a single file on disk. Great for
+  development. Both databases in this project (talentbridge.db,
+  interview.db) are SQLite. Would need to be replaced with
+  PostgreSQL before a real production deployment.
+
+State (in React)
+  Data that the UI displays and that can change over time. When
+  state changes, React re-renders the component to show the new
+  value. Managed with the useState() hook.
+
+StreamingResponse
+  A FastAPI response type where data is sent to the client in
+  chunks as it becomes available, rather than waiting for the
+  entire response to be assembled. Used here to stream audio bytes
+  from the TTS endpoint back to the browser.
+
+Technical Question
+  An interview question that tests hard skills or knowledge.
+  Example: "What is the difference between a class and a struct
+  in Swift?" These are pre-generated per job and reused.
+
+Token (invite token)
+  A random secret string generated by TalentBridge and included
+  in the interview invite link. When the candidate opens the link,
+  the interview module validates the token against TalentBridge
+  to confirm it's legitimate and not expired. Single-use, 48hr expiry.
+
+Transcript
+  The full text of everything a candidate said during the interview,
+  organized by question. Sent to Claude at the end to generate
+  the evaluation report.
+
+TTS (Text-to-Speech)
+  Technology that converts written text into spoken audio.
+  This project uses two TTS systems: OpenAI's TTS API (primary,
+  higher quality) and the browser's built-in Web Speech API
+  (fallback, free but lower quality).
+
+useCallback (React)
+  A React hook that memoizes (caches) a function so it's not
+  recreated on every render. Important when passing functions
+  as dependencies to useEffect — without it, the effect would
+  re-run on every render.
+
+useEffect (React)
+  A React hook that runs side effects (things outside the UI,
+  like API calls or setting up timers) after the component renders.
+  Can return a cleanup function that runs when the effect is
+  re-run or the component is removed.
+
+vite
+  A build tool for JavaScript frontend projects. Handles bundling
+  (combining many JS files into one), local dev server, and
+  production builds.
+
+Web Speech API
+  A browser built-in API for speech recognition (voice → text)
+  and speech synthesis (text → voice). Free but only works
+  reliably in Chrome. The speech recognition part is what captures
+  candidate answers in real time.
+
+================================================================
+  END OF DOCUMENT
+================================================================
