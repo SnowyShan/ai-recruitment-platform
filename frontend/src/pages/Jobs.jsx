@@ -18,6 +18,7 @@ import {
   CheckSquare,
   Square,
   Layers,
+  Loader2,
 } from 'lucide-react';
 
 const INTERVIEW_API = import.meta.env.VITE_INTERVIEW_API_URL || 'http://localhost:8001';
@@ -182,10 +183,17 @@ const Jobs = () => {
                     View
                   </Link>
                   {job.status === 'draft' && (
-                    <button onClick={() => handlePublish(job.id)} className="btn btn-primary flex-1 py-2">
-                      <PlayCircle className="w-4 h-4" />
-                      Publish
-                    </button>
+                    job.setup_status === 'generating' ? (
+                      <div className="flex-1 flex items-center gap-1.5 justify-center py-2 px-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm font-medium cursor-not-allowed">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
+                        <span className="truncate">Generating…</span>
+                      </div>
+                    ) : (
+                      <button onClick={() => handlePublish(job.id)} className="btn btn-primary flex-1 py-2">
+                        <PlayCircle className="w-4 h-4" />
+                        Publish
+                      </button>
+                    )
                   )}
                   {job.status === 'active' && (
                     <button onClick={() => handleClose(job.id)} className="btn btn-secondary flex-1 py-2">

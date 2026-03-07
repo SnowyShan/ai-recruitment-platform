@@ -933,12 +933,17 @@ Experience: 5 years of relevant industry experience.`;
           <div className="flex items-center gap-2 text-slate-700 font-semibold">
             <Settings className="w-4 h-4 text-slate-500" />
             Screening Interview Config
+            {setupStatus === 'generating' && (
+              <span className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                <Loader2 className="w-3 h-3 animate-spin" /> Generating…
+              </span>
+            )}
           </div>
           {showScreeningConfig ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
         </button>
 
         {showScreeningConfig && screeningConfig && (
-          <div className="px-6 pb-6 border-t border-slate-100 pt-5 grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div className={`px-6 pb-6 border-t border-slate-100 pt-5 grid grid-cols-1 sm:grid-cols-2 gap-6 ${setupStatus === 'generating' ? 'opacity-50 pointer-events-none select-none' : ''}`}>
 
             {/* Time limit */}
             <div>

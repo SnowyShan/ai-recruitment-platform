@@ -145,7 +145,7 @@ class JobResponse(JobBase):
 
 # Candidate Schemas
 class CandidateBase(BaseModel):
-    email: EmailStr
+    email: str  # str not EmailStr — we validate on create, not on read
     full_name: str
     phone: Optional[str] = None
     location: Optional[str] = None
