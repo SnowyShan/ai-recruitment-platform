@@ -509,6 +509,15 @@ export default function Interview() {
             </li>
           </ul>
 
+          {/* Browser compatibility notice */}
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-800 flex gap-2">
+            <span className="text-base leading-none mt-0.5">⚠️</span>
+            <span>
+              <strong>Supported browsers:</strong> Chrome, Edge, or Safari on macOS.
+              {' '}Voice transcription is <strong>not supported on iPhone or iPad</strong> — please use a desktop or Android device.
+            </span>
+          </div>
+
           {introPhase === 'intro' && (
             <button
               onClick={handleGrantMic}
