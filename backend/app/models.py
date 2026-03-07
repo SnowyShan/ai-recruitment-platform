@@ -77,10 +77,15 @@ class Job(Base):
     deadline = Column(DateTime, nullable=True)
 
     # Interview / screening config (per-job overrides)
-    interview_time_limit    = Column(Integer, default=45)
-    interview_num_questions = Column(Integer, default=8)
-    interview_difficulty    = Column(Integer, default=3)
-    interview_seniority     = Column(String(20), default="mid")
+    interview_time_limit      = Column(Integer, default=45)
+    interview_num_questions   = Column(Integer, default=8)
+    interview_difficulty      = Column(Integer, default=3)
+    interview_seniority       = Column(String(20), default="mid")
+    interview_behavioral_pct  = Column(Integer, default=20)   # % of questions that are behavioral
+
+    # Question-bank setup state (managed by interview module background tasks)
+    domain        = Column(String(50), nullable=True)   # inferred from job title
+    setup_status  = Column(String(20), nullable=True)   # null | generating | ready | failed
 
     # Relationships
     created_by_user = relationship("User", back_populates="jobs")

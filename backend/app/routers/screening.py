@@ -23,20 +23,26 @@ def _create_interview_session(
     seniority_bar: str = "mid",
     time_limit: int = 45,
     num_questions: int = 8,
+    job_id: Optional[int] = None,
+    behavioral_pct: int = 20,
 ) -> Optional[str]:
     """Call interview module to create a session. Returns session_id or None."""
     try:
+        payload = {
+            "job_description": job_description,
+            "resume_text": resume_text or "",
+            "difficulty": difficulty,
+            "seniority_bar": seniority_bar,
+            "time_limit": time_limit,
+            "num_questions": num_questions,
+            "behavioral_pct": behavioral_pct,
+        }
+        if job_id:
+            payload["job_id"] = job_id
         resp = httpx.post(
             f"{INTERVIEW_API_URL}/api/interview/session",
-            json={
-                "job_description": job_description,
-                "resume_text": resume_text or "",
-                "difficulty": difficulty,
-                "seniority_bar": seniority_bar,
-                "time_limit": time_limit,
-                "num_questions": num_questions,
-            },
-            timeout=30.0,
+            json=payload,
+            timeout=60.0,  # increased: behavioral TTS generation takes time
         )
         resp.raise_for_status()
         return resp.json()["session_id"]
@@ -80,13 +86,20 @@ async def create_screening(
     if not application:
         raise HTTPException(status_code=404, detail="Application not found")
 
-    # Block only if interview is actively in progress
+    # Block if interview is actively in progress
     in_progress = db.query(models.Screening).filter(
         models.Screening.application_id == screening_data.application_id,
         models.Screening.status == "in_progress",
     ).first()
     if in_progress:
         raise HTTPException(status_code=400, detail="An interview is currently in progress for this candidate")
+
+    # Block if job questions are still being generated
+    if job.setup_status == "generating":
+        raise HTTPException(
+            status_code=400,
+            detail="Interview questions for this job are still being generated. Please try again in a moment."
+        )
 
     # Invalidate any pending (unused) tokens for this application
     _invalidate_pending_tokens(db, screening_data.application_id)
@@ -102,6 +115,8 @@ async def create_screening(
         seniority_bar=job.interview_seniority or "mid",
         time_limit=job.interview_time_limit or 45,
         num_questions=job.interview_num_questions or 8,
+        job_id=job.id,
+        behavioral_pct=job.interview_behavioral_pct or 20,
     )
 
     # Generate invite token

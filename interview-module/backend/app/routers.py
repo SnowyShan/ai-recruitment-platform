@@ -1,10 +1,10 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
-import uuid, json, os, httpx, io
+import uuid, json, os, httpx, io, math, random
 from datetime import datetime
-from .database import get_conn
+from .database import get_conn, AUDIO_DIR
 from . import claude_client as ai
 from openai import OpenAI
 
@@ -23,7 +23,8 @@ def _notify_talentbridge(session_id: str, report: dict):
     except Exception as e:
         print(f"[TALENTBRIDGE CALLBACK] Failed: {e}")
 
-# ── Questions ──────────────────────────────────────────────────
+
+# ── Questions (ad-hoc generation) ─────────────────────────────────────────────
 
 questions_router = APIRouter(prefix="/api/interview", tags=["Questions"])
 
@@ -39,7 +40,151 @@ def generate_questions(req: QuestionsRequest):
     questions = ai.generate_questions(req.resume_text, req.job_description, req.difficulty, req.num_questions, req.hardcoded_questions)
     return {"questions": questions}
 
-# ── Evaluate ───────────────────────────────────────────────────
+
+# ── Question Bank ──────────────────────────────────────────────────────────────
+
+question_bank_router = APIRouter(prefix="/api/interview", tags=["QuestionBank"])
+
+@question_bank_router.get("/question-bank")
+def search_question_bank(
+    domain: str,
+    difficulty: Optional[int] = None,
+    limit: int = Query(30, le=100),
+):
+    """Search the shared question bank by domain and difficulty."""
+    conn = get_conn()
+    if difficulty:
+        rows = conn.execute(
+            "SELECT * FROM questions WHERE domain=? AND difficulty=? ORDER BY created_at DESC LIMIT ?",
+            (domain, difficulty, limit)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM questions WHERE domain=? ORDER BY created_at DESC LIMIT ?",
+            (domain, limit)
+        ).fetchall()
+    conn.close()
+    return {"questions": [dict(r) for r in rows], "domain": domain}
+
+
+# ── Job Setup ──────────────────────────────────────────────────────────────────
+
+job_setup_router = APIRouter(prefix="/api/interview", tags=["JobSetup"])
+
+class JobSetupRequest(BaseModel):
+    job_title: str
+    job_description: str
+    domain: str
+    difficulty: int = 3
+    seniority: str = "mid"
+    num_technical: int = 7
+    selected_question_ids: list[str] = []  # Pre-selected from question bank
+
+@job_setup_router.post("/job/{job_id}/setup", status_code=202)
+def setup_job(job_id: int, req: JobSetupRequest, background_tasks: BackgroundTasks):
+    """Trigger background generation of technical questions + audio for a job."""
+    conn = get_conn()
+    existing = conn.execute("SELECT job_id FROM job_setup WHERE job_id=?", (job_id,)).fetchone()
+    now = datetime.utcnow().isoformat()
+    if existing:
+        conn.execute(
+            "UPDATE job_setup SET domain=?, difficulty=?, seniority=?, num_technical=?, "
+            "status='generating', progress_current=0, progress_total=?, question_ids='[]', updated_at=? "
+            "WHERE job_id=?",
+            (req.domain, req.difficulty, req.seniority, req.num_technical, req.num_technical, now, job_id)
+        )
+    else:
+        conn.execute(
+            "INSERT INTO job_setup (job_id, domain, difficulty, seniority, num_technical, num_behavioral, "
+            "status, progress_current, progress_total, question_ids, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,0,'generating',0,?,?,?,?)",
+            (job_id, req.domain, req.difficulty, req.seniority, req.num_technical, req.num_technical, '[]', now, now)
+        )
+    conn.commit()
+    conn.close()
+
+    background_tasks.add_task(_run_job_setup, job_id=job_id, req=req)
+    return {"status": "generating", "job_id": job_id}
+
+
+@job_setup_router.get("/job/{job_id}/setup/status")
+def get_job_setup_status(job_id: int):
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM job_setup WHERE job_id=?", (job_id,)).fetchone()
+    conn.close()
+    if not row:
+        return {"status": "not_found", "job_id": job_id, "progress_current": 0, "progress_total": 0}
+    return {
+        "job_id": job_id,
+        "status": row["status"],
+        "progress_current": row["progress_current"],
+        "progress_total": row["progress_total"],
+        "domain": row["domain"],
+    }
+
+
+def _run_job_setup(job_id: int, req: JobSetupRequest):
+    """Background task: generate technical questions + TTS audio for a job."""
+    try:
+        selected_ids = list(req.selected_question_ids)
+
+        # How many more questions need to be generated?
+        needed = max(0, req.num_technical - len(selected_ids))
+
+        if needed > 0:
+            generated = ai.generate_questions(
+                resume_text="",  # technical questions are candidate-independent
+                job_description=req.job_description,
+                difficulty=req.difficulty,
+                num_questions=needed,
+                hardcoded=None,
+            )
+
+            for q in generated:
+                q_id = str(uuid.uuid4())
+                audio_filename = f"{q_id}.mp3"
+                audio_path = os.path.join(AUDIO_DIR, audio_filename)
+
+                tts_ok = ai.generate_and_store_tts(
+                    q.get("voice_text") or q["question"],
+                    audio_path,
+                )
+
+                conn = get_conn()
+                conn.execute(
+                    "INSERT OR IGNORE INTO questions (id, domain, difficulty, question, voice_text, topic, audio_path, created_at) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (q_id, req.domain, req.difficulty, q["question"], q.get("voice_text", ""),
+                     q.get("topic", ""), audio_filename if tts_ok else None, datetime.utcnow().isoformat())
+                )
+                selected_ids.append(q_id)
+                conn.execute(
+                    "UPDATE job_setup SET progress_current=?, question_ids=?, updated_at=? WHERE job_id=?",
+                    (len(selected_ids), json.dumps(selected_ids), datetime.utcnow().isoformat(), job_id)
+                )
+                conn.commit()
+                conn.close()
+
+        # Mark ready
+        conn = get_conn()
+        conn.execute(
+            "UPDATE job_setup SET status='ready', progress_current=?, progress_total=?, question_ids=?, updated_at=? WHERE job_id=?",
+            (len(selected_ids), len(selected_ids), json.dumps(selected_ids), datetime.utcnow().isoformat(), job_id)
+        )
+        conn.commit()
+        conn.close()
+        print(f"[JOB SETUP] Job {job_id} ready — {len(selected_ids)} technical questions")
+
+    except Exception as e:
+        print(f"[JOB SETUP] Job {job_id} failed: {e}")
+        conn = get_conn()
+        conn.execute("UPDATE job_setup SET status='failed', updated_at=? WHERE job_id=?",
+                     (datetime.utcnow().isoformat(), job_id))
+        conn.commit()
+        conn.close()
+
+
+# ── Evaluate ───────────────────────────────────────────────────────────────────
 
 evaluate_router = APIRouter(prefix="/api/interview", tags=["Evaluate"])
 
@@ -55,7 +200,8 @@ def evaluate_answer(req: EvaluateRequest):
     result = ai.evaluate_answer(req.question, req.candidate_answer, req.job_description, req.seniority_bar, req.hardcoded_acceptable_answer)
     return result
 
-# ── Report ─────────────────────────────────────────────────────
+
+# ── Report ─────────────────────────────────────────────────────────────────────
 
 report_router = APIRouter(prefix="/api/interview", tags=["Report"])
 
@@ -76,13 +222,14 @@ def generate_report(req: ReportRequest):
     report = ai.generate_report(req.job_description, req.resume_text, pairs)
     return report
 
-# ── TTS ────────────────────────────────────────────────────────
+
+# ── TTS (on-demand streaming — used as fallback) ───────────────────────────────
 
 tts_router = APIRouter(prefix="/api/interview", tags=["TTS"])
 
 class TTSRequest(BaseModel):
     text: str
-    voice: str = "nova"  # nova sounds natural and professional
+    voice: str = "nova"
 
 @tts_router.post("/tts")
 def synthesize_speech(req: TTSRequest):
@@ -100,7 +247,7 @@ def synthesize_speech(req: TTSRequest):
     return StreamingResponse(io.BytesIO(audio_bytes), media_type="audio/mpeg")
 
 
-# ── Sessions ───────────────────────────────────────────────────
+# ── Sessions ───────────────────────────────────────────────────────────────────
 
 session_router = APIRouter(prefix="/api/interview", tags=["Sessions"])
 
@@ -112,18 +259,85 @@ class SessionCreate(BaseModel):
     time_limit: int = 45
     num_questions: int = 8
     hardcoded_questions: Optional[list[str]] = None
+    # New fields for question-bank-aware session creation
+    job_id: Optional[int] = None
+    behavioral_pct: int = 20  # % of questions that are behavioral/resume-based
+
 
 @session_router.post("/session")
 def create_session(req: SessionCreate):
     session_id = str(uuid.uuid4())
-    questions = ai.generate_questions(req.resume_text, req.job_description, req.difficulty, req.num_questions, req.hardcoded_questions)
+    questions = []
+
+    if req.hardcoded_questions:
+        # Legacy: explicit hardcoded questions override everything
+        questions = ai.generate_questions(
+            req.resume_text, req.job_description,
+            req.difficulty, req.num_questions, req.hardcoded_questions
+        )
+    elif req.job_id:
+        # New path: use pre-built technical questions from job bank
+        conn = get_conn()
+        setup = conn.execute("SELECT * FROM job_setup WHERE job_id=?", (req.job_id,)).fetchone()
+        conn.close()
+
+        if setup and setup["status"] == "ready":
+            question_ids = json.loads(setup["question_ids"] or "[]")
+            num_behavioral = math.ceil(req.num_questions * req.behavioral_pct / 100)
+            num_technical = req.num_questions - num_behavioral
+
+            # Fetch technical questions from bank (up to num_technical)
+            conn = get_conn()
+            technical_qs = []
+            for q_id in question_ids[:num_technical]:
+                row = conn.execute("SELECT * FROM questions WHERE id=?", (q_id,)).fetchone()
+                if row:
+                    q = dict(row)
+                    q["type"] = "technical"
+                    q["audio_url"] = f"/audio/{q['audio_path']}" if q.get("audio_path") else None
+                    technical_qs.append(q)
+            conn.close()
+
+            # Generate behavioral questions from resume
+            behavioral_qs = ai.generate_behavioral_questions(
+                req.resume_text, req.job_description, num_behavioral
+            )
+
+            # Generate TTS for behavioral questions (store per-session)
+            for i, q in enumerate(behavioral_qs):
+                audio_filename = f"{session_id}_b{i}.mp3"
+                audio_path = os.path.join(AUDIO_DIR, audio_filename)
+                tts_ok = ai.generate_and_store_tts(q.get("voice_text") or q["question"], audio_path)
+                q["audio_url"] = f"/audio/{audio_filename}" if tts_ok else None
+                q["type"] = "behavioral"
+
+            # Interleave: shuffle technical, append behavioral at end
+            random.shuffle(technical_qs)
+            questions = technical_qs + behavioral_qs
+        else:
+            # Job setup not ready — fall back to generating everything
+            questions = ai.generate_questions(
+                req.resume_text, req.job_description,
+                req.difficulty, req.num_questions, None
+            )
+    else:
+        # No job_id — old flow, generate everything
+        questions = ai.generate_questions(
+            req.resume_text, req.job_description,
+            req.difficulty, req.num_questions, None
+        )
+
     conn = get_conn()
-    conn.execute("""INSERT INTO sessions (id, job_description, resume_text, difficulty, seniority_bar, time_limit, questions, answers, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)""",
-        (session_id, req.job_description, req.resume_text, req.difficulty, req.seniority_bar, req.time_limit, json.dumps(questions), "{}", datetime.utcnow().isoformat()))
+    conn.execute(
+        "INSERT INTO sessions (id, job_description, resume_text, difficulty, seniority_bar, "
+        "time_limit, questions, answers, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (session_id, req.job_description, req.resume_text, req.difficulty, req.seniority_bar,
+         req.time_limit, json.dumps(questions), "{}", "active", datetime.utcnow().isoformat())
+    )
     conn.commit()
     conn.close()
     return {"session_id": session_id, "questions": questions, "time_limit": req.time_limit}
+
 
 @session_router.get("/session/{session_id}")
 def get_session(session_id: str):
@@ -141,6 +355,7 @@ def get_session(session_id: str):
         "seniority_bar": row["seniority_bar"],
         "report": json.loads(row["report"]) if row["report"] else None,
     }
+
 
 class AnswerSubmit(BaseModel):
     question_index: int
@@ -162,6 +377,7 @@ def submit_answer(session_id: str, req: AnswerSubmit):
     conn.close()
     return {"question_index": req.question_index, "evaluation": evaluation}
 
+
 class CompleteRequest(BaseModel):
     full_transcript: Optional[str] = None
     questions: Optional[list] = None
@@ -176,26 +392,28 @@ def complete_session(session_id: str, req: CompleteRequest = CompleteRequest()):
     full_transcript = req.full_transcript or ""
     settings_row = conn.execute("SELECT value FROM settings WHERE key = 'evaluation_prompt'").fetchone()
     evaluation_prompt = settings_row["value"] if settings_row else ""
-    report = ai.generate_report_from_transcript(row["job_description"], row["resume_text"], questions, full_transcript, evaluation_prompt)
-    conn.execute("UPDATE sessions SET status = 'completed', report = ?, completed_at = ? WHERE id = ?",
-        (json.dumps(report), datetime.utcnow().isoformat(), session_id))
+    report = ai.generate_report_from_transcript(
+        row["job_description"], row["resume_text"], questions, full_transcript, evaluation_prompt
+    )
+    conn.execute(
+        "UPDATE sessions SET status='completed', report=?, completed_at=? WHERE id=?",
+        (json.dumps(report), datetime.utcnow().isoformat(), session_id)
+    )
     conn.commit()
     conn.close()
-    # Notify TalentBridge
     _notify_talentbridge(session_id, report)
     return report
 
-# ── Test Data ──────────────────────────────────────────────────
 
-import os, random
+# ── Test Data ──────────────────────────────────────────────────────────────────
+
+import os, random as _random
 
 testdata_router = APIRouter(prefix="/api/interview", tags=["TestData"])
-
 TESTDATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "testData")
 
 @testdata_router.get("/testdata")
 def list_testdata():
-    """List available test data folders."""
     base = os.path.abspath(TESTDATA_DIR)
     folders = sorted([f for f in os.listdir(base) if os.path.isdir(os.path.join(base, f))])
     return {"folders": folders}
@@ -217,7 +435,7 @@ def get_testdata(folder: str):
     }
 
 
-# ── Settings ───────────────────────────────────────────────────
+# ── Settings ───────────────────────────────────────────────────────────────────
 
 settings_router = APIRouter(prefix="/api/interview", tags=["Settings"])
 
@@ -237,9 +455,11 @@ def get_settings():
 @settings_router.put("/settings")
 def update_settings(req: SettingsUpdate):
     conn = get_conn()
-    conn.execute("""INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
-        ("evaluation_prompt", req.evaluation_prompt, datetime.utcnow().isoformat()))
+    conn.execute(
+        "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        ("evaluation_prompt", req.evaluation_prompt, datetime.utcnow().isoformat())
+    )
     conn.commit()
     conn.close()
     return SettingsResponse(evaluation_prompt=req.evaluation_prompt)

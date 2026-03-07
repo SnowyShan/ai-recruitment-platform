@@ -2,6 +2,7 @@ import sqlite3, json, os
 from datetime import datetime
 
 DB_PATH = os.getenv("DB_PATH", "./interview.db")
+AUDIO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "audio")
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
@@ -9,7 +10,11 @@ def get_conn():
     return conn
 
 def init_db():
+    os.makedirs(AUDIO_DIR, exist_ok=True)
+
     conn = get_conn()
+
+    # Sessions
     conn.execute("""
         CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
@@ -26,6 +31,8 @@ def init_db():
             completed_at TEXT
         )
     """)
+
+    # Settings
     conn.execute("""
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -33,7 +40,41 @@ def init_db():
             updated_at TEXT
         )
     """)
-    # Seed default evaluation prompt if not set
+
+    # Question bank — shared, reusable across jobs
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS questions (
+            id TEXT PRIMARY KEY,
+            domain TEXT NOT NULL,
+            difficulty INTEGER NOT NULL,
+            question TEXT NOT NULL,
+            voice_text TEXT,
+            topic TEXT,
+            audio_path TEXT,
+            created_at TEXT
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_questions_domain ON questions(domain, difficulty)")
+
+    # Job setup state — tracks background question/audio generation per job
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS job_setup (
+            job_id INTEGER PRIMARY KEY,
+            domain TEXT,
+            difficulty INTEGER,
+            seniority TEXT,
+            num_technical INTEGER,
+            num_behavioral INTEGER,
+            status TEXT DEFAULT 'pending',
+            progress_current INTEGER DEFAULT 0,
+            progress_total INTEGER DEFAULT 0,
+            question_ids TEXT DEFAULT '[]',
+            created_at TEXT,
+            updated_at TEXT
+        )
+    """)
+
+    # Seed default evaluation prompt
     existing = conn.execute("SELECT key FROM settings WHERE key = 'evaluation_prompt'").fetchone()
     if not existing:
         default_prompt = """Important evaluation guidelines:
@@ -44,5 +85,6 @@ def init_db():
 - For skipped questions, score 0."""
         conn.execute("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
             ('evaluation_prompt', default_prompt, datetime.now().isoformat()))
+
     conn.commit()
     conn.close()

@@ -92,7 +92,8 @@ export default function Interview() {
   //   'ready'    → mic granted/denied, "Start Interview" button shown, Q0 audio pre-fetching
   //   'started'  → interview running
   const [introPhase, setIntroPhase] = useState('intro')
-  const prefetchedAudioRef = useRef(null)
+  // Map of question index → pre-fetched blob URL (all questions fetched in parallel during 'ready' phase)
+  const prefetchedAudioMapRef = useRef({})
 
   const micReady  = introPhase === 'started'
   const started   = introPhase === 'started'
@@ -106,20 +107,45 @@ export default function Interview() {
     setIntroPhase('ready')
   }
 
-  // Pre-fetch Q0 audio while user reads instructions (after mic granted).
-  // Cleanup cancels the store if introPhase changes before the fetch completes —
-  // otherwise the stale blob lands in prefetchedAudioRef and gets played for Q2.
+  // Pre-fetch audio for ALL questions while user reads instructions.
+  // Questions with audio_url (pre-generated on server) are fetched from there;
+  // questions without audio_url fall back to on-demand TTS.
+  // All fetches fire in parallel — whichever questions are ready first get cached first.
   useEffect(() => {
     if (introPhase !== 'ready' || questions.length === 0) return
-    const text = questions[0]?.voice_text || questions[0]?.question || ''
-    if (!text) return
     let cancelled = false
-    axios.post(`${API}/api/interview/tts`, { text }, { responseType: 'blob' })
-      .then(res => {
-        if (!cancelled) prefetchedAudioRef.current = URL.createObjectURL(res.data)
+
+    const prefetchOne = async (idx) => {
+      const q = questions[idx]
+      if (!q) return
+      try {
+        let blobUrl
+        if (q.audio_url) {
+          // Pre-generated audio from question bank or session setup
+          const res = await axios.get(`${API}${q.audio_url}`, { responseType: 'blob' })
+          blobUrl = URL.createObjectURL(res.data)
+        } else {
+          // Fall back to on-demand TTS
+          const text = q.voice_text || q.question || ''
+          if (!text) return
+          const res = await axios.post(`${API}/api/interview/tts`, { text }, { responseType: 'blob' })
+          blobUrl = URL.createObjectURL(res.data)
+        }
+        if (!cancelled) prefetchedAudioMapRef.current[idx] = blobUrl
+      } catch (_) {} // non-fatal — speakThenRecord falls back to TTS
+    }
+
+    // Fire all in parallel
+    questions.forEach((_, idx) => prefetchOne(idx))
+
+    return () => {
+      cancelled = true
+      // Revoke any cached blobs to free memory
+      Object.values(prefetchedAudioMapRef.current).forEach(url => {
+        try { URL.revokeObjectURL(url) } catch (_) {}
       })
-      .catch(() => {})
-    return () => { cancelled = true }
+      prefetchedAudioMapRef.current = {}
+    }
   }, [introPhase, questions])
 
   // "Start Interview" tap — this IS the user gesture that unlocks iOS audio autoplay
@@ -218,13 +244,32 @@ export default function Interview() {
         })
     }
 
-    if (prefetchedAudioRef.current) {
-      const blobUrl = prefetchedAudioRef.current
-      prefetchedAudioRef.current = null
-      playBlob(blobUrl)
+    // Check pre-fetched map first (keyed by question index)
+    const cachedUrl = prefetchedAudioMapRef.current[currentIndexRef.current]
+    if (cachedUrl) {
+      delete prefetchedAudioMapRef.current[currentIndexRef.current]
+      playBlob(cachedUrl)
       return
     }
 
+    // Check if current question has a server-side audio_url (play directly)
+    const currentQ = questionsRef.current[currentIndexRef.current]
+    if (currentQ?.audio_url) {
+      axios.get(`${API}${currentQ.audio_url}`, { responseType: 'blob' })
+        .then(res => {
+          if (ttsGenRef.current !== gen) return
+          playBlob(URL.createObjectURL(res.data))
+        })
+        .catch(() => {
+          // Fall through to on-demand TTS
+          fetchViaTTS()
+        })
+      return
+    }
+
+    fetchViaTTS()
+    // eslint-disable-next-line no-inner-declarations
+    function fetchViaTTS() {
     // Fetch TTS audio from backend
     axios.post(`${API}/api/interview/tts`, { text }, { responseType: 'blob' })
       .then(res => {
@@ -247,6 +292,7 @@ export default function Interview() {
         utterance.onerror = () => { setIsSpeaking(false); if (!ttsCancelRef.current) startRecording() }
         window.speechSynthesis.speak(utterance)
       })
+    } // end fetchViaTTS
   }, [])
 
   // Speak questions — gated on both micReady and started (user tapped "Tap to Begin").

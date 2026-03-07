@@ -53,6 +53,7 @@ export const jobsAPI = {
   getAll: (params) => api.get('/api/jobs', { params }),
   getById: (id) => api.get(`/api/jobs/${id}`),
   getPipeline: (id) => api.get(`/api/jobs/${id}/pipeline`),
+  getSetupStatus: (id) => api.get(`/api/jobs/${id}/setup-status`),
   create: (data) => api.post('/api/jobs', data),
   update: (id, data) => api.put(`/api/jobs/${id}`, data),
   delete: (id) => api.delete(`/api/jobs/${id}`),

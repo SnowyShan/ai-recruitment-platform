@@ -4,7 +4,58 @@ from sqlalchemy import func, or_
 from typing import List, Optional
 from .. import models, schemas, auth
 from ..database import get_db
-import json
+import json, os, httpx
+
+INTERVIEW_API_URL = os.getenv("INTERVIEW_API_URL", "http://localhost:8001")
+
+_SCREENING_CONFIG_FIELDS = {
+    "interview_time_limit", "interview_num_questions",
+    "interview_difficulty", "interview_seniority", "interview_behavioral_pct",
+}
+
+_DOMAIN_KEYWORDS = {
+    'ios':       ['ios', 'swift', 'objective-c', 'xcode', 'uikit', 'swiftui', 'apple'],
+    'android':   ['android', 'kotlin'],
+    'backend':   ['backend', 'back-end', 'python', 'django', 'fastapi', 'node.js', 'golang', 'rust', 'api developer', 'server-side'],
+    'frontend':  ['frontend', 'front-end', 'react', 'vue', 'angular', 'typescript developer', 'ui engineer'],
+    'fullstack': ['full stack', 'fullstack', 'full-stack'],
+    'data':      ['data scientist', 'machine learning', 'ml engineer', 'ai engineer', 'data engineer'],
+    'devops':    ['devops', 'site reliability', 'sre ', 'kubernetes', 'docker', 'cloud engineer', 'platform engineer'],
+    'mobile':    ['mobile developer', 'react native', 'flutter'],
+    'security':  ['security engineer', 'cybersecurity', 'appsec', 'infosec'],
+}
+
+def _infer_domain(job_title: str) -> str:
+    t = job_title.lower()
+    for domain, keywords in _DOMAIN_KEYWORDS.items():
+        if any(kw in t for kw in keywords):
+            return domain
+    return 'general'
+
+
+def _trigger_job_setup(job: models.Job, selected_question_ids: list = None):
+    """Call interview module to (re)generate technical questions + audio for a job."""
+    num_q = job.interview_num_questions or 8
+    behavioral_pct = job.interview_behavioral_pct or 20
+    num_behavioral = max(1, round(num_q * behavioral_pct / 100))
+    num_technical = num_q - num_behavioral
+
+    try:
+        httpx.post(
+            f"{INTERVIEW_API_URL}/api/interview/job/{job.id}/setup",
+            json={
+                "job_title": job.title,
+                "job_description": job.description or job.title,
+                "domain": job.domain or "general",
+                "difficulty": job.interview_difficulty or 3,
+                "seniority": job.interview_seniority or "mid",
+                "num_technical": max(1, num_technical),
+                "selected_question_ids": selected_question_ids or [],
+            },
+            timeout=5.0,
+        )
+    except Exception as e:
+        print(f"[JOB SETUP] Failed to trigger setup for job {job.id}: {e}")
 
 router = APIRouter(prefix="/api/jobs", tags=["Jobs"])
 
@@ -15,20 +66,29 @@ async def create_job(
     current_user: models.User = Depends(auth.get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Create a new job posting"""
+    """Create a new job posting and trigger background question setup."""
+    # Pop fields that aren't on the Job model
+    data = job_data.model_dump()
+    selected_question_ids = data.pop("selected_question_ids", []) or []
+
+    # Infer domain from job title
+    domain = _infer_domain(data.get("title", ""))
+
     new_job = models.Job(
-        **job_data.model_dump(),
+        **data,
+        domain=domain,
+        setup_status="generating",
         created_by=current_user.id,
-        status="draft"
+        status="draft",
     )
-    
     db.add(new_job)
     db.commit()
     db.refresh(new_job)
-    
-    # Log activity
+
+    # Trigger background question + audio generation
+    _trigger_job_setup(new_job, selected_question_ids)
+
     log_activity(db, current_user.id, "job_created", "job", new_job.id, json.dumps({"title": new_job.title}))
-    
     return new_job
 
 
@@ -171,17 +231,25 @@ async def update_job(
             detail="Job not found"
         )
     
-    # Update fields
     update_data = job_update.model_dump(exclude_unset=True)
+    selected_question_ids = update_data.pop("selected_question_ids", None)
+
+    # Detect if any screening config field changed — triggers re-setup
+    screening_config_changed = bool(_SCREENING_CONFIG_FIELDS & set(update_data.keys()))
+
     for field, value in update_data.items():
         setattr(job, field, value)
-    
+
+    if screening_config_changed:
+        job.setup_status = "generating"
+
     db.commit()
     db.refresh(job)
-    
-    # Log activity
+
+    if screening_config_changed:
+        _trigger_job_setup(job, selected_question_ids or [])
+
     log_activity(db, current_user.id, "job_updated", "job", job.id)
-    
     return job
 
 
@@ -218,23 +286,81 @@ async def publish_job(
     current_user: models.User = Depends(auth.get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Publish a draft job"""
+    """Publish a draft job — blocked while interview questions are still generating."""
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
-    
     if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+    if job.setup_status == "generating":
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Job not found"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot publish: interview questions are still being generated. Please wait."
         )
-    
+
+    # Sync setup status from interview module before allowing publish
+    if job.setup_status != "ready":
+        try:
+            resp = httpx.get(f"{INTERVIEW_API_URL}/api/interview/job/{job_id}/setup/status", timeout=3.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("status") == "ready":
+                    job.setup_status = "ready"
+                    db.commit()
+                elif data.get("status") == "generating":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Cannot publish: interview questions are still being generated."
+                    )
+        except HTTPException:
+            raise
+        except Exception:
+            pass  # If interview module unreachable, allow publish anyway
+
     job.status = "active"
     db.commit()
     db.refresh(job)
-    
-    # Log activity
     log_activity(db, current_user.id, "job_published", "job", job.id)
-    
     return job
+
+
+@router.get("/{job_id}/setup-status")
+async def get_setup_status(
+    job_id: int,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Poll interview question setup progress for a job."""
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Fetch live progress from interview module
+    try:
+        resp = httpx.get(f"{INTERVIEW_API_URL}/api/interview/job/{job_id}/setup/status", timeout=3.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            im_status = data.get("status")
+            # Sync to TalentBridge DB if status changed
+            if im_status in ("ready", "failed") and job.setup_status != im_status:
+                job.setup_status = im_status
+                db.commit()
+            return {
+                "job_id": job_id,
+                "setup_status": im_status,
+                "progress_current": data.get("progress_current", 0),
+                "progress_total": data.get("progress_total", 0),
+                "domain": data.get("domain"),
+            }
+    except Exception:
+        pass
+
+    return {
+        "job_id": job_id,
+        "setup_status": job.setup_status,
+        "progress_current": 0,
+        "progress_total": 0,
+        "domain": job.domain,
+    }
 
 
 @router.post("/{job_id}/close", response_model=schemas.JobResponse)

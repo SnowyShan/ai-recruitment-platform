@@ -1,7 +1,55 @@
 from typing import Optional
-import os, json
+import os, json, math
 from dotenv import load_dotenv
 load_dotenv()
+
+# ── Domain inference ──────────────────────────────────────────────────────────
+
+_DOMAIN_KEYWORDS = {
+    'ios':       ['ios', 'swift', 'objective-c', 'xcode', 'uikit', 'swiftui', 'apple'],
+    'android':   ['android', 'kotlin', 'java mobile'],
+    'backend':   ['backend', 'back-end', 'python', 'django', 'fastapi', 'node.js', 'golang',
+                  'go developer', 'rust', 'api developer', 'server-side'],
+    'frontend':  ['frontend', 'front-end', 'react', 'vue', 'angular', 'javascript developer',
+                  'typescript developer', 'ui engineer'],
+    'fullstack': ['full stack', 'fullstack', 'full-stack'],
+    'data':      ['data scientist', 'machine learning', 'ml engineer', 'ai engineer',
+                  'data engineer', 'analytics engineer'],
+    'devops':    ['devops', 'site reliability', 'sre ', 'kubernetes', 'docker', 'aws engineer',
+                  'cloud engineer', 'platform engineer', 'infrastructure'],
+    'mobile':    ['mobile developer', 'react native', 'flutter', 'mobile engineer'],
+    'security':  ['security engineer', 'cybersecurity', 'appsec', 'infosec'],
+}
+
+def infer_domain(job_title: str) -> str:
+    """Infer technical domain from a job title string."""
+    t = job_title.lower()
+    for domain, keywords in _DOMAIN_KEYWORDS.items():
+        if any(kw in t for kw in keywords):
+            return domain
+    return 'general'
+
+# ── TTS to disk ───────────────────────────────────────────────────────────────
+
+def generate_and_store_tts(text: str, audio_path: str, voice: str = "nova") -> bool:
+    """Generate TTS audio via OpenAI and save to disk. Returns True on success."""
+    api_key = os.getenv("OPENAI_API_KEY", "")
+    if not api_key or not text.strip():
+        return False
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+        response = client.audio.speech.create(
+            model="tts-1",
+            voice=voice,
+            input=text.strip(),
+        )
+        os.makedirs(os.path.dirname(audio_path), exist_ok=True)
+        response.stream_to_file(audio_path)
+        return True
+    except Exception as e:
+        print(f"[TTS] Failed to generate audio for path {audio_path}: {e}")
+        return False
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
@@ -237,3 +285,56 @@ Return ONLY valid JSON in this exact format:
     result["per_question"] = deduped_pq
 
     return result
+
+# ── Behavioral question generation ────────────────────────────────────────────
+
+def generate_behavioral_questions(resume_text: str, job_description: str, num_questions: int) -> list:
+    """Generate behavioral/resume-based questions tailored to a specific candidate."""
+    if num_questions <= 0:
+        return []
+
+    client = _client()
+    if not client:
+        return _mock_behavioral_questions(num_questions)
+
+    prompt = f"""You are a skilled behavioral interviewer generating questions for a specific candidate.
+
+Job Description:
+{job_description}
+
+Candidate Resume:
+{resume_text}
+
+Generate exactly {num_questions} behavioral interview questions tailored to THIS candidate's specific background.
+
+Rules:
+1. Reference specific projects, roles, technologies, or achievements from their resume.
+2. Use "Tell me about a time when..." or "Walk me through how you handled..." phrasing.
+3. Cover different behavioral competencies: leadership, collaboration, problem-solving, adaptability, ownership.
+4. Each question must be distinct — no overlap in the competency being tested.
+5. Write a voice_text version of each question: natural, conversational, no special characters, suitable for text-to-speech.
+
+Return ONLY a JSON array:
+[{{"question": "...", "voice_text": "...", "topic": "Behavioral", "type": "behavioral"}}]"""
+
+    resp = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1500,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    text = resp.content[0].text.strip()
+    start, end = text.find("["), text.rfind("]") + 1
+    questions = json.loads(text[start:end])
+
+    for q in questions:
+        q["type"] = "behavioral"
+    return questions[:num_questions]
+
+
+def _mock_behavioral_questions(n: int) -> list:
+    samples = [
+        {"question": "Tell me about a time when you had to debug a critical production issue under pressure.", "voice_text": "Can you walk me through a time when you had to debug a critical production issue under pressure? What did you do?", "topic": "Behavioral", "type": "behavioral"},
+        {"question": "Describe a situation where you had to push back on a technical decision made by your manager.", "voice_text": "Tell me about a situation where you disagreed with a technical decision made by your manager. How did you handle it?", "topic": "Behavioral", "type": "behavioral"},
+        {"question": "Tell me about a time you mentored or helped a junior team member grow.", "voice_text": "Can you tell me about a time when you helped a junior teammate grow or improve their skills?", "topic": "Behavioral", "type": "behavioral"},
+    ]
+    return samples[:n]

@@ -1,12 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { jobsAPI } from '../services/api';
+import axios from 'axios';
 import {
   Briefcase,
   Plus,
   Search,
-  Filter,
-  MoreVertical,
   MapPin,
   Users,
   DollarSign,
@@ -14,7 +13,14 @@ import {
   PlayCircle,
   PauseCircle,
   X,
+  ChevronDown,
+  ChevronUp,
+  CheckSquare,
+  Square,
+  Layers,
 } from 'lucide-react';
+
+const INTERVIEW_API = import.meta.env.VITE_INTERVIEW_API_URL || 'http://localhost:8001';
 
 const Jobs = () => {
   const [jobs, setJobs] = useState([]);
@@ -215,18 +221,78 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
   const [formData, setFormData] = useState({
     title: '', department: '', location: '', job_type: 'full_time', experience_level: 'mid',
     salary_min: '', salary_max: '', description: '', requirements: '', skills_required: '',
+    interview_behavioral_pct: 20,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+  // Question bank
+  const [bankOpen, setBankOpen] = useState(false);
+  const [bankQuestions, setBankQuestions] = useState([]);
+  const [bankLoading, setBankLoading] = useState(false);
+  const [selectedQIds, setSelectedQIds] = useState([]);
+  const titleDebounceRef = useRef(null);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+
+    // When title changes, debounce a question bank fetch
+    if (name === 'title') {
+      clearTimeout(titleDebounceRef.current);
+      titleDebounceRef.current = setTimeout(() => loadBankQuestions(value), 600);
+    }
+  };
+
+  const loadBankQuestions = async (title) => {
+    if (!title || title.length < 3) { setBankQuestions([]); return; }
+    setBankLoading(true);
+    try {
+      const res = await axios.get(`${INTERVIEW_API}/api/interview/question-bank`, {
+        params: { domain: inferDomainFE(title), limit: 20 },
+      });
+      setBankQuestions(res.data.questions || []);
+    } catch (_) {
+      setBankQuestions([]);
+    } finally {
+      setBankLoading(false);
+    }
+  };
+
+  // Simple client-side domain inference (mirrors backend logic)
+  const inferDomainFE = (title) => {
+    const t = title.toLowerCase();
+    if (/ios|swift|xcode|uikit|swiftui/.test(t)) return 'ios';
+    if (/android|kotlin/.test(t)) return 'android';
+    if (/frontend|front-end|react|vue|angular/.test(t)) return 'frontend';
+    if (/data sci|machine learn|ml engineer|ai engineer|data engineer/.test(t)) return 'data';
+    if (/devops|sre|kubernetes|docker|cloud|platform/.test(t)) return 'devops';
+    if (/mobile|react native|flutter/.test(t)) return 'mobile';
+    if (/full.?stack/.test(t)) return 'fullstack';
+    if (/backend|back-end|python|django|fastapi|golang|node/.test(t)) return 'backend';
+    return 'general';
+  };
+
+  const toggleQuestion = (id) => {
+    setSelectedQIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const numTechnical = Math.max(1, Math.round(8 * (1 - formData.interview_behavioral_pct / 100)));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
-      const data = { ...formData, salary_min: formData.salary_min ? parseInt(formData.salary_min) : null, salary_max: formData.salary_max ? parseInt(formData.salary_max) : null };
+      const data = {
+        ...formData,
+        salary_min: formData.salary_min ? parseInt(formData.salary_min) : null,
+        salary_max: formData.salary_max ? parseInt(formData.salary_max) : null,
+        interview_behavioral_pct: parseInt(formData.interview_behavioral_pct) || 20,
+        selected_question_ids: selectedQIds,
+      };
       await jobsAPI.create(data);
       onSuccess();
     } catch (err) {
@@ -248,7 +314,7 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
           <div className="space-y-5">
             <div>
               <label className="label">Job Title *</label>
-              <input type="text" name="title" value={formData.title} onChange={handleChange} className="input" placeholder="e.g., Senior Software Engineer" required />
+              <input type="text" name="title" value={formData.title} onChange={handleChange} className="input" placeholder="e.g., Senior iOS Engineer" required />
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
@@ -302,10 +368,86 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
               <label className="label">Skills Required</label>
               <input type="text" name="skills_required" value={formData.skills_required} onChange={handleChange} className="input" placeholder="e.g., Python, React, AWS" />
             </div>
+
+            {/* ── Interview Setup ── */}
+            <div className="border border-slate-200 rounded-xl overflow-hidden">
+              <div className="bg-slate-50 px-4 py-3 flex items-center gap-2">
+                <Layers className="w-4 h-4 text-slate-500" />
+                <span className="text-sm font-semibold text-slate-700">Interview Setup</span>
+              </div>
+              <div className="p-4 space-y-4">
+                {/* Behavioral split */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="label mb-0">Behavioral Questions</label>
+                    <span className="text-sm font-semibold text-slate-700">{formData.interview_behavioral_pct}%</span>
+                  </div>
+                  <input
+                    type="range" name="interview_behavioral_pct"
+                    min={0} max={50} step={5}
+                    value={formData.interview_behavioral_pct}
+                    onChange={handleChange}
+                    className="w-full accent-primary-600"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    For 8 questions: <strong>{Math.max(1, Math.round(8 * formData.interview_behavioral_pct / 100))} behavioral</strong>, <strong>{8 - Math.max(1, Math.round(8 * formData.interview_behavioral_pct / 100))} technical</strong> — technical questions are pre-generated and reused across candidates.
+                  </p>
+                </div>
+
+                {/* Question bank selector */}
+                {bankQuestions.length > 0 && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setBankOpen(v => !v)}
+                      className="w-full flex items-center justify-between text-sm font-medium text-primary-600 hover:text-primary-700"
+                    >
+                      <span>
+                        Reuse from question bank ({bankQuestions.length} available)
+                        {selectedQIds.length > 0 && ` · ${selectedQIds.length}/${numTechnical} selected`}
+                      </span>
+                      {bankOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    </button>
+                    {bankOpen && (
+                      <div className="mt-2 border border-slate-200 rounded-lg overflow-hidden max-h-48 overflow-y-auto">
+                        {bankLoading ? (
+                          <div className="p-4 text-sm text-slate-400 text-center">Loading…</div>
+                        ) : (
+                          bankQuestions.map(q => (
+                            <button
+                              key={q.id}
+                              type="button"
+                              onClick={() => toggleQuestion(q.id)}
+                              className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-slate-50 border-b border-slate-100 last:border-0"
+                            >
+                              {selectedQIds.includes(q.id)
+                                ? <CheckSquare className="w-4 h-4 text-primary-600 flex-shrink-0 mt-0.5" />
+                                : <Square className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
+                              }
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs text-slate-700 leading-snug line-clamp-2">{q.question}</p>
+                                <p className="text-xs text-slate-400 mt-0.5">{q.topic} · difficulty {q.difficulty}</p>
+                              </div>
+                              {q.audio_path && <span className="text-xs text-emerald-600 flex-shrink-0">🔊</span>}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {bankLoading && bankQuestions.length === 0 && (
+                  <p className="text-xs text-slate-400">Searching question bank…</p>
+                )}
+              </div>
+            </div>
           </div>
+
           <div className="flex items-center gap-3 mt-6 pt-6 border-t border-slate-100">
             <button type="button" onClick={onClose} className="btn btn-secondary flex-1">Cancel</button>
-            <button type="submit" disabled={loading} className="btn btn-primary flex-1">{loading ? 'Creating...' : 'Create Job'}</button>
+            <button type="submit" disabled={loading} className="btn btn-primary flex-1">
+              {loading ? 'Creating…' : 'Create Job'}
+            </button>
           </div>
         </form>
       </div>

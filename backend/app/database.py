@@ -40,7 +40,10 @@ def run_migrations(engine):
         "ALTER TABLE jobs ADD COLUMN interview_time_limit INTEGER DEFAULT 45",
         "ALTER TABLE jobs ADD COLUMN interview_num_questions INTEGER DEFAULT 8",
         "ALTER TABLE jobs ADD COLUMN interview_difficulty INTEGER DEFAULT 3",
-        "ALTER TABLE jobs ADD COLUMN interview_seniority TEXT DEFAULT \'mid\'",
+        "ALTER TABLE jobs ADD COLUMN interview_seniority TEXT DEFAULT 'mid'",
+        "ALTER TABLE jobs ADD COLUMN interview_behavioral_pct INTEGER DEFAULT 20",
+        "ALTER TABLE jobs ADD COLUMN domain TEXT",
+        "ALTER TABLE jobs ADD COLUMN setup_status TEXT",
     ]
     with engine.connect() as conn:
         for sql in migrations:

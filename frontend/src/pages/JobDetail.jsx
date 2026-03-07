@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -23,6 +23,7 @@ import {
   ChevronUp,
   Save,
   PlayCircle,
+  Loader2,
 } from 'lucide-react';
 import { jobsAPI, applicationsAPI, screeningsAPI } from '../services/api';
 
@@ -554,6 +555,25 @@ export default function JobDetail() {
     }
   }, [id]);
 
+  // Poll setup status while generating
+  const startSetupPolling = useCallback((jobId) => {
+    clearInterval(setupPollRef.current);
+    setupPollRef.current = setInterval(async () => {
+      try {
+        const res = await jobsAPI.getSetupStatus(jobId);
+        const { setup_status, progress_current, progress_total } = res.data;
+        setSetupStatus(setup_status);
+        setSetupProgress({ current: progress_current || 0, total: progress_total || 0 });
+        if (setup_status === 'ready' || setup_status === 'failed') {
+          clearInterval(setupPollRef.current);
+          // Refresh job data to get updated setup_status
+          const jobRes = await jobsAPI.getById(jobId);
+          setJob(jobRes.data);
+        }
+      } catch (_) {}
+    }, 3000);
+  }, []);
+
   useEffect(() => {
     const init = async () => {
       setLoading(true);
@@ -563,7 +583,12 @@ export default function JobDetail() {
           loadPipeline(),
           loadApplications(null),
         ]);
-        setJob(jobRes.data);
+        const jobData = jobRes.data;
+        setJob(jobData);
+        setSetupStatus(jobData.setup_status);
+        if (jobData.setup_status === 'generating') {
+          startSetupPolling(id);
+        }
       } catch (err) {
         console.error('Failed to load job', err);
       } finally {
@@ -571,7 +596,8 @@ export default function JobDetail() {
       }
     };
     init();
-  }, [id, loadPipeline, loadApplications]);
+    return () => clearInterval(setupPollRef.current);
+  }, [id, loadPipeline, loadApplications, startSetupPolling]);
 
   // Sync filter when funnel stage clicked
   const handleFunnelStageClick = (stage) => {
@@ -651,6 +677,11 @@ export default function JobDetail() {
   const [configSaved, setConfigSaved] = useState(false);
   const [launchingMock, setLaunchingMock] = useState(false);
 
+  // Setup status polling
+  const [setupStatus, setSetupStatus] = useState(null); // null | 'generating' | 'ready' | 'failed'
+  const [setupProgress, setSetupProgress] = useState({ current: 0, total: 0 });
+  const setupPollRef = useRef(null);
+
   const handleBulkInvite = async () => {
     setBulkLoading(true);
     try {
@@ -708,6 +739,7 @@ export default function JobDetail() {
       num_questions: job.interview_num_questions ?? 8,
       difficulty: job.interview_difficulty ?? 3,
       seniority: job.interview_seniority ?? 'mid',
+      behavioral_pct: job.interview_behavioral_pct ?? 20,
     });
   }
 
@@ -754,9 +786,14 @@ Experience: 5 years of relevant industry experience.`;
         interview_num_questions: screeningConfig.num_questions,
         interview_difficulty: screeningConfig.difficulty,
         interview_seniority: screeningConfig.seniority,
+        interview_behavioral_pct: screeningConfig.behavioral_pct,
       });
       setConfigSaved(true);
       setTimeout(() => setConfigSaved(false), 2000);
+      // Screening config change triggers re-generation — start polling
+      setSetupStatus('generating');
+      setSetupProgress({ current: 0, total: screeningConfig.num_questions });
+      startSetupPolling(job.id);
     } catch (e) {
       console.error('Failed to save screening config', e);
     } finally {
@@ -813,8 +850,14 @@ Experience: 5 years of relevant industry experience.`;
 
           {/* Action buttons */}
           <div className="flex gap-2 flex-wrap">
-            {job.status === 'draft'  && (
-              <button onClick={() => handleJobAction('publish')} className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors">
+            {job.status === 'draft' && (
+              <button
+                onClick={() => handleJobAction('publish')}
+                disabled={setupStatus === 'generating'}
+                title={setupStatus === 'generating' ? 'Wait for question generation to complete' : ''}
+                className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {setupStatus === 'generating' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 Publish
               </button>
             )}
@@ -841,6 +884,35 @@ Experience: 5 years of relevant industry experience.`;
           </div>
         </div>
       </div>
+
+      {/* ── Setup Progress Banner ── */}
+      {setupStatus === 'generating' && (
+        <div className="card p-4 border-amber-200 bg-amber-50">
+          <div className="flex items-center gap-3">
+            <Loader2 className="w-5 h-5 text-amber-600 animate-spin flex-shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-amber-800">
+                Generating interview questions…
+                {setupProgress.total > 0 && ` (${setupProgress.current}/${setupProgress.total})`}
+              </p>
+              {setupProgress.total > 0 && (
+                <div className="mt-2 h-1.5 bg-amber-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-amber-500 rounded-full transition-all duration-500"
+                    style={{ width: `${Math.round((setupProgress.current / setupProgress.total) * 100)}%` }}
+                  />
+                </div>
+              )}
+              <p className="text-xs text-amber-600 mt-1">Job cannot be published until complete.</p>
+            </div>
+          </div>
+        </div>
+      )}
+      {setupStatus === 'failed' && (
+        <div className="card p-4 border-red-200 bg-red-50">
+          <p className="text-sm text-red-700">⚠️ Question generation failed. Save the screening config again to retry.</p>
+        </div>
+      )}
 
       {/* ── Pipeline Funnel ── */}
       <PipelineFunnel
@@ -894,6 +966,23 @@ Experience: 5 years of relevant industry experience.`;
                 onChange={e => setScreeningConfig(c => ({ ...c, num_questions: Math.max(1, parseInt(e.target.value) || 1) }))}
                 className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400"
               />
+            </div>
+
+            {/* Behavioral split */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-sm font-medium text-slate-700">Behavioral Questions</label>
+                <span className="text-sm font-semibold text-slate-700">{screeningConfig.behavioral_pct ?? 20}%</span>
+              </div>
+              <input
+                type="range" min={0} max={50} step={5}
+                value={screeningConfig.behavioral_pct ?? 20}
+                onChange={e => setScreeningConfig(c => ({ ...c, behavioral_pct: parseInt(e.target.value) }))}
+                className="w-full accent-indigo-600"
+              />
+              <p className="text-xs text-slate-400 mt-1">
+                {Math.max(1, Math.round((screeningConfig.num_questions || 8) * (screeningConfig.behavioral_pct ?? 20) / 100))} behavioral · {(screeningConfig.num_questions || 8) - Math.max(1, Math.round((screeningConfig.num_questions || 8) * (screeningConfig.behavioral_pct ?? 20) / 100))} technical (pre-generated, reused across candidates)
+              </p>
             </div>
 
             {/* Difficulty */}
