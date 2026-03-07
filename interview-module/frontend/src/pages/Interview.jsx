@@ -516,7 +516,7 @@ export default function Interview() {
               onClick={handleStart}
               className="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-4 rounded-xl text-base shadow-sm active:scale-95 transition-transform"
             >
-              {prefetchedAudioRef.current ? 'Start Interview →' : 'Start Interview →'}
+              Tap to Begin →
             </button>
           )}
         </div>
