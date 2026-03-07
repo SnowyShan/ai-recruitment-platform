@@ -581,7 +581,6 @@ export default function Interview() {
       <div className="card p-6 mb-6">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <span className="badge badge-primary">{q.topic || 'Technical'}</span>
             {isSpeaking && (
               <span className="inline-flex items-center gap-1 text-xs text-indigo-500 font-medium">
                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse inline-block" />
