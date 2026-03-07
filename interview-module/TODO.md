@@ -1,5 +1,5 @@
 # TalentBridge — Interview Module TODO
-*Last updated: March 5, 2026 (evening)*
+*Last updated: March 7, 2026*
 *Use this file to come up to speed on the project before making changes.*
 
 ---
@@ -55,8 +55,10 @@ cd interview-module/frontend && npm run dev -- --port 5174
 - [x] **Task 5:** Report generation — Full transcript + questions sent to Claude in one batch call at session end. Detailed report: per-question scores, overall pass/fail, strengths, weaknesses. Report POSTed back to TalentBridge and stored. Recruiter can view via "View Report" in JobDetail.
 - [x] **Task 6 Phase 1:** Browser TTS (speechSynthesis) — questions read aloud via `window.speechSynthesis`, mute toggle, replay button, Chrome keepalive fix, Safari restart bug fixed (keepalive disabled on non-Chrome), auto-record starts after speech ends.
 - [x] **Task 6 Phase 2:** OpenAI TTS (`tts-1`, voice `nova`) — backend `/api/interview/tts` endpoint streams audio/mpeg on demand per question. Frontend plays `<audio>` element; falls back to speechSynthesis on error. Generation counter prevents stale in-flight responses from playing after user advances. Pre-interview instructions screen handles iOS autoplay gate — Q0 audio pre-fetched while user reads instructions, plays instantly on "Start Interview" tap.
+- [x] **Task 6 Phase 3: Pre-generated audio question bank** — Backend generates TTS audio for all technical questions at job creation time (background job). New `questions` table stores question bank with `audio_path` per entry; new `job_setup` table tracks generation status per job. Interview module serves pre-built audio as static files (`/audio`). Session creation uses bank questions + freshly generated behavioral questions (resume-tailored). Frontend pre-fetches audio for all questions in parallel during "ready" phase; falls back to on-demand TTS if no pre-generated audio. On-the-fly question generation at session creation time removed — `create_session` now requires a ready `job_setup` (returns 400/409 otherwise). TalentBridge: publish and invite blocked while `setup_status='generating'`; JobDetail shows live progress bar (polls every 3s); CreateJobModal has behavioral split slider (default 20%).
 - [x] **Pre-interview instructions screen** — shows duration, question count, usage tips. "Allow Microphone & Continue" requests mic permission. "Start Interview" tap is the iOS user gesture that unlocks audio autoplay. No "Tap to Begin" needed inside the interview itself.
 - [x] **Safari/iOS compatibility** — TDZ crash fixed (declaration reorder), transcript capture race condition fixed (`questionAnswersRef` updated live on every `onresult`), production build via `npx serve` instead of vite dev server, mic permission requested upfront.
+- [x] **Mobile responsive layout** — all pages (Setup, Interview, Report, Settings, ThankYou) fully responsive.
 
 ### Integration — Complete
 
@@ -89,43 +91,6 @@ cd interview-module/frontend && npm run dev -- --port 5174
 ---
 
 ## What Is Remaining ❌
-
-### V2 — Task 6: TTS (Read Questions Aloud)
-
-**Phase 1 (browser speechSynthesis) — DONE ✅**
-
-**Next: Phase 2 — OpenAI TTS, on-demand per question**
-
-Generate audio for one question at a time, only when the candidate navigates to it. No upfront generation, no file storage — backend streams audio directly back to the frontend.
-
-**Flow:**
-```
-Question N displayed
-  → frontend POST /api/interview/tts { text: voice_text }
-  → backend calls OpenAI tts-1, streams audio/mpeg back
-  → frontend plays blob URL
-  → audio.onended → startRecording()
-  → user presses Next → same flow for question N+1
-  → if TTS fails → fall back to speechSynthesis
-```
-
-**What needs doing:**
-- Add `OPENAI_API_KEY` to interview module backend `.env`
-- Install `openai` in the interview module backend venv
-- Add `POST /api/interview/tts` endpoint — takes `{ text }`, calls OpenAI `tts-1`, returns `audio/mpeg` stream. No file saved.
-- Frontend: on each question change, call `/tts`, create blob URL, play `<audio>`. `onended` → `startRecording()`. Fall back to `speechSynthesis` on error.
-
-**Cost:** ~$0.015 per 1K characters (tts-1). Typical question ~100 chars → ~$0.0015/question. Negligible.
-
-**Files to edit:**
-1. `interview-module/backend/.env` — add `OPENAI_API_KEY`
-2. `interview-module/backend/requirements.txt` — add `openai`
-3. `interview-module/backend/app/routers.py` — add `/tts` endpoint
-4. `interview-module/frontend/src/pages/Interview.jsx` — call `/tts` on question change, play audio
-
-**Future optimization (Phase 3):** Cache audio per `voice_text` hash so the same question isn't re-generated across candidates.
-
----
 
 ### V3 — Task 7: Natural Conversation + Small Talk
 
@@ -211,6 +176,23 @@ Question N displayed
 3. **No candidate authentication** — invite token is the only auth mechanism. By design (see PRODUCT.md — candidate auth is out of scope for interview module, handled by TalentBridge invite link).
 
 4. **SQLite in production** — `interview.db` is fine for development. Needs PostgreSQL before real production use.
+
+5. **Audio files committed to repo** — pre-generated `.mp3` files land in `interview-module/backend/audio/`. Should be gitignored and stored externally (S3/CDN) before production.
+
+---
+
+## Recent Fixes (post March 5)
+
+- **Duplicate transcript entries** — Web Speech API race condition causing duplicate `onresult` events written to transcript. Fixed by deduplicating on result index (`0b717fe`, `d8c2a32`).
+- **Per-question report deduplication** — fixed duplicate entries in evaluation report (`d8c2a32`).
+- **Blank screen after mic grant** — stale `prefetchedAudioRef` reference after question bank refactor. Fixed (`4f64f0e`).
+- **Mock interview delay + pre-fetch audio destroyed on start** — timing bug in mock interview flow; pre-fetched audio was being torn down before playback. Fixed (`8217754`).
+- **Overlapping audio / audio-after-End** — audio kept playing past interview end or overlapped on question advance. Fixed (`42c9f0e`).
+- **UnboundLocalError in `create_screening`** — `job` variable referenced before assignment in error path. Fixed (`7539e77`).
+- **Applications list 500** — `CandidateResponse.email` was `EmailStr`, rejecting test emails like `matt@bat`. Changed to `str` (`f034fd1`).
+- **Publish button / screening config during generation** — Jobs list now shows amber "Generating…" pill; screening config grayed out with `pointer-events-none` while setup in progress (`f034fd1`).
+- **Auto-trigger setup for old jobs** — jobs created before `setup_status` column existed now auto-trigger setup on first load (`05cf0a1`).
+- **Question type badge removed** — cleaned up from interview UI (`cc1af65`).
 
 ---
 
