@@ -1,8 +1,8 @@
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
-import uuid, json, os, httpx, io, math, random
+import uuid, json, os, httpx, io, math, random, tempfile
 from datetime import datetime
 from .database import get_conn, AUDIO_DIR
 from . import claude_client as ai
@@ -245,6 +245,39 @@ def synthesize_speech(req: TTSRequest):
     )
     audio_bytes = response.read()
     return StreamingResponse(io.BytesIO(audio_bytes), media_type="audio/mpeg")
+
+
+@tts_router.post("/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """Transcribe audio via OpenAI Whisper-1. Used for iOS/mobile where
+    Web Speech API recognition is unavailable (Chrome iOS, Safari iOS)."""
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+    audio_bytes = await file.read()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio file")
+    content_type = file.content_type or "audio/webm"
+    ext = "m4a" if ("mp4" in content_type or "m4a" in content_type) else "webm"
+    from openai import OpenAI
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as tmp:
+        tmp.write(audio_bytes)
+        tmp_path = tmp.name
+    try:
+        import time as _time
+        for attempt in range(2):  # retry once on empty result
+            with open(tmp_path, "rb") as f:
+                result = client.audio.transcriptions.create(model="whisper-1", file=f)
+            text = result.text or ""
+            if text.strip() or attempt == 1:
+                return {"text": text}
+            _time.sleep(0.5)
+        return {"text": ""}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+    finally:
+        try: os.unlink(tmp_path)
+        except: pass
 
 
 # ── Sessions ───────────────────────────────────────────────────────────────────
