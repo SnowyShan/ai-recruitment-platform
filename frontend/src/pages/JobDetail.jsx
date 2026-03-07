@@ -463,7 +463,7 @@ function ReportModal({ screening, onClose }) {
 
           {/* Strengths / Weaknesses */}
           {(ev.strengths?.length > 0 || ev.weaknesses?.length > 0) && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <p className="text-xs font-semibold text-emerald-700 mb-2">Strengths</p>
                 <ul className="space-y-1">{(ev.strengths || []).map((s,i) => <li key={i} className="text-slate-600 text-xs">• {s}</li>)}</ul>
@@ -713,6 +713,9 @@ export default function JobDetail() {
 
   const handleLaunchMock = async () => {
     setLaunchingMock(true);
+    // Open the window synchronously (direct user gesture) — browsers block window.open after await
+    const INTERVIEW_URL = import.meta.env.VITE_INTERVIEW_URL || 'http://localhost:5174';
+    const newWindow = window.open('', '_blank');
     try {
       const INTERVIEW_API = import.meta.env.VITE_INTERVIEW_API_URL || 'http://localhost:8001';
       const mockResume = `Mock candidate for testing the "${job.title}" interview setup.
@@ -733,10 +736,10 @@ Experience: 5 years of relevant industry experience.`;
         }),
       });
       const { session_id } = await res.json();
-      const INTERVIEW_URL = import.meta.env.VITE_INTERVIEW_URL || 'http://localhost:5174';
-      window.open(`${INTERVIEW_URL}/interview/${session_id}`, '_blank');
+      newWindow.location.href = `${INTERVIEW_URL}/interview/${session_id}`;
     } catch (e) {
       console.error('Failed to launch mock interview', e);
+      newWindow.close();
       alert('Could not launch mock interview. Check console for details.');
     } finally {
       setLaunchingMock(false);
@@ -896,12 +899,12 @@ Experience: 5 years of relevant industry experience.`;
             {/* Difficulty */}
             <div>
               <label className="text-sm font-medium text-slate-700 mb-2 block">Difficulty</label>
-              <div className="flex gap-2">
-                {[{v:1,l:'Easy'},{v:2,l:'Moderate'},{v:3,l:'Standard'},{v:4,l:'Hard'},{v:5,l:'Expert'}].map(({v,l}) => (
+              <div className="grid grid-cols-5 gap-1">
+                {[{v:1,l:'Easy'},{v:2,l:'Mod'},{v:3,l:'Std'},{v:4,l:'Hard'},{v:5,l:'Expert'}].map(({v,l}) => (
                   <button
                     key={v}
                     onClick={() => setScreeningConfig(c => ({ ...c, difficulty: v }))}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                    className={`py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
                       screeningConfig.difficulty === v
                         ? 'bg-indigo-600 text-white border-indigo-600'
                         : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'
@@ -914,12 +917,12 @@ Experience: 5 years of relevant industry experience.`;
             {/* Seniority */}
             <div>
               <label className="text-sm font-medium text-slate-700 mb-2 block">Seniority Bar</label>
-              <div className="flex gap-2">
+              <div className="grid grid-cols-4 gap-1">
                 {[{v:'junior',l:'Junior'},{v:'mid',l:'Mid'},{v:'senior',l:'Senior'},{v:'lead',l:'Lead'}].map(({v,l}) => (
                   <button
                     key={v}
                     onClick={() => setScreeningConfig(c => ({ ...c, seniority: v }))}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                    className={`py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
                       screeningConfig.seniority === v
                         ? 'bg-indigo-600 text-white border-indigo-600'
                         : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'
@@ -1009,7 +1012,7 @@ Experience: 5 years of relevant industry experience.`;
 
       {/* ── Sticky Bulk Action Bar ── */}
       {selected.size > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-center pb-4 pointer-events-none">
+        <div className="fixed bottom-0 left-0 lg:left-64 right-0 z-40 flex items-center justify-center pb-4 pointer-events-none">
           <div className="pointer-events-auto flex items-center gap-4 bg-slate-900 text-white px-6 py-3 rounded-xl shadow-2xl">
             <span className="text-sm font-medium">
               {selected.size} selected

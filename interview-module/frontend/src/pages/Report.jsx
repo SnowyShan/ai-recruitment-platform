@@ -79,9 +79,9 @@ export default function Report() {
 
         {/* Overall score card */}
         <div className="card p-6">
-          <div className="flex items-center gap-6">
+          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6">
             <ScoreRing score={report.overall_score} />
-            <div className="flex-1">
+            <div className="flex-1 text-center sm:text-left">
               <div className={`text-xl font-bold mb-1 ${scoreLabel}`}>
                 {report.pass ? '✓ Pass' : '✗ Did not pass'}
               </div>
@@ -91,7 +91,7 @@ export default function Report() {
         </div>
 
         {/* Strengths / Weaknesses */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="card p-5">
             <h3 className="text-sm font-semibold text-emerald-700 mb-3 flex items-center gap-1.5">
               <span className="w-4 h-4 rounded-full bg-emerald-100 flex items-center justify-center text-[10px]">✓</span>

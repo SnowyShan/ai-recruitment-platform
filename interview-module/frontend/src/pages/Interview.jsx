@@ -105,14 +105,20 @@ export default function Interview() {
     setIntroPhase('ready')
   }
 
-  // Pre-fetch Q0 audio while user reads instructions (after mic granted)
+  // Pre-fetch Q0 audio while user reads instructions (after mic granted).
+  // Cleanup cancels the store if introPhase changes before the fetch completes —
+  // otherwise the stale blob lands in prefetchedAudioRef and gets played for Q2.
   useEffect(() => {
     if (introPhase !== 'ready' || questions.length === 0) return
     const text = questions[0]?.voice_text || questions[0]?.question || ''
     if (!text) return
+    let cancelled = false
     axios.post(`${API}/api/interview/tts`, { text }, { responseType: 'blob' })
-      .then(res => { prefetchedAudioRef.current = URL.createObjectURL(res.data) })
+      .then(res => {
+        if (!cancelled) prefetchedAudioRef.current = URL.createObjectURL(res.data)
+      })
       .catch(() => {})
+    return () => { cancelled = true }
   }, [introPhase, questions])
 
   // "Start Interview" tap — this IS the user gesture that unlocks iOS audio autoplay
@@ -479,10 +485,10 @@ export default function Interview() {
   )
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col p-6 max-w-3xl mx-auto">
+    <div className="min-h-screen bg-slate-50 flex flex-col p-4 sm:p-6 max-w-3xl mx-auto">
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4 sm:mb-6">
         <div>
           <p className="text-sm font-medium text-slate-500">Question {currentIndex + 1} of {questions.length}</p>
           {isWrapUp && (
@@ -493,12 +499,12 @@ export default function Interview() {
           )}
         </div>
         <div className="text-right">
-          <span className={`font-mono text-2xl font-bold ${timerColor}`}>{formatTime(timeLeft)}</span>
+          <span className={`font-mono text-xl sm:text-2xl font-bold ${timerColor}`}>{formatTime(timeLeft)}</span>
         </div>
       </div>
 
       {/* Progress bar */}
-      <div className="w-full h-1.5 bg-slate-200 rounded-full mb-8">
+      <div className="w-full h-1.5 bg-slate-200 rounded-full mb-5 sm:mb-8">
         <div
           className="h-1.5 bg-primary-600 rounded-full transition-all duration-500"
           style={{ width: `${progress}%` }}
@@ -548,7 +554,7 @@ export default function Interview() {
             </button>
           </div>
         </div>
-        <p className="text-lg font-medium text-slate-800 leading-relaxed">{q.question}</p>
+        <p className="text-base sm:text-lg font-medium text-slate-800 leading-relaxed">{q.question}</p>
         {isSpeaking && (
           <p className="text-xs text-slate-400 mt-3 italic">Listening starts automatically after the question is read…</p>
         )}
@@ -566,14 +572,14 @@ export default function Interview() {
       </div>
 
       {/* Controls */}
-      <div className="flex gap-3">
-        <button onClick={nextQuestion} className="btn btn-primary flex-1">
-          {currentIndex + 1 >= questions.length ? 'Finish Interview' : 'Next Question →'}
+      <div className="flex gap-2 sm:gap-3 mt-2">
+        <button onClick={nextQuestion} className="btn btn-primary flex-1 text-sm sm:text-base py-3">
+          {currentIndex + 1 >= questions.length ? 'Finish' : 'Next →'}
         </button>
-        <button onClick={skip} className="btn btn-secondary px-5">
+        <button onClick={skip} className="btn btn-secondary px-4 sm:px-5 text-sm py-3">
           Skip
         </button>
-        <button onClick={finish} className="btn btn-danger px-5">
+        <button onClick={finish} className="btn btn-danger px-4 sm:px-5 text-sm py-3">
           End
         </button>
       </div>

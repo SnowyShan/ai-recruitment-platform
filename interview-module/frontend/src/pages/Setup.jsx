@@ -130,7 +130,7 @@ export default function Setup() {
           </div>
 
           {/* Basic config */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="label">Difficulty — {DIFFICULTY_LABELS[difficulty]}</label>
               <input type="range" min={1} max={5} value={difficulty}

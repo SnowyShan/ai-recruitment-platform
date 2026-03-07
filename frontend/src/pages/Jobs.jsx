@@ -250,7 +250,7 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
               <label className="label">Job Title *</label>
               <input type="text" name="title" value={formData.title} onChange={handleChange} className="input" placeholder="e.g., Senior Software Engineer" required />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="label">Department</label>
                 <input type="text" name="department" value={formData.department} onChange={handleChange} className="input" placeholder="e.g., Engineering" />
@@ -260,7 +260,7 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
                 <input type="text" name="location" value={formData.location} onChange={handleChange} className="input" placeholder="e.g., San Francisco, CA" />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="label">Job Type</label>
                 <select name="job_type" value={formData.job_type} onChange={handleChange} className="input">
@@ -280,7 +280,7 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
                 </select>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="label">Salary Min ($)</label>
                 <input type="number" name="salary_min" value={formData.salary_min} onChange={handleChange} className="input" placeholder="e.g., 80000" />
