@@ -266,66 +266,56 @@ class SessionCreate(BaseModel):
 
 @session_router.post("/session")
 def create_session(req: SessionCreate):
+    from fastapi import HTTPException as _HTTPException
     session_id = str(uuid.uuid4())
-    questions = []
 
-    if req.hardcoded_questions:
-        # Legacy: explicit hardcoded questions override everything
-        questions = ai.generate_questions(
-            req.resume_text, req.job_description,
-            req.difficulty, req.num_questions, req.hardcoded_questions
+    if not req.job_id:
+        raise _HTTPException(status_code=400, detail="job_id is required")
+
+    conn = get_conn()
+    setup = conn.execute("SELECT * FROM job_setup WHERE job_id=?", (req.job_id,)).fetchone()
+    conn.close()
+
+    if not setup or setup["status"] != "ready":
+        status = setup["status"] if setup else "not_found"
+        raise _HTTPException(
+            status_code=409,
+            detail=f"Job question setup is not ready (status: {status}). "
+                   "Wait for setup to complete before starting a session."
         )
-    elif req.job_id:
-        # New path: use pre-built technical questions from job bank
-        conn = get_conn()
-        setup = conn.execute("SELECT * FROM job_setup WHERE job_id=?", (req.job_id,)).fetchone()
-        conn.close()
 
-        if setup and setup["status"] == "ready":
-            question_ids = json.loads(setup["question_ids"] or "[]")
-            num_behavioral = math.ceil(req.num_questions * req.behavioral_pct / 100)
-            num_technical = req.num_questions - num_behavioral
+    question_ids = json.loads(setup["question_ids"] or "[]")
+    num_behavioral = math.ceil(req.num_questions * req.behavioral_pct / 100)
+    num_technical = req.num_questions - num_behavioral
 
-            # Fetch technical questions from bank (up to num_technical)
-            conn = get_conn()
-            technical_qs = []
-            for q_id in question_ids[:num_technical]:
-                row = conn.execute("SELECT * FROM questions WHERE id=?", (q_id,)).fetchone()
-                if row:
-                    q = dict(row)
-                    q["type"] = "technical"
-                    q["audio_url"] = f"/audio/{q['audio_path']}" if q.get("audio_path") else None
-                    technical_qs.append(q)
-            conn.close()
+    # Fetch technical questions from bank
+    conn = get_conn()
+    technical_qs = []
+    for q_id in question_ids[:num_technical]:
+        row = conn.execute("SELECT * FROM questions WHERE id=?", (q_id,)).fetchone()
+        if row:
+            q = dict(row)
+            q["type"] = "technical"
+            q["audio_url"] = f"/audio/{q['audio_path']}" if q.get("audio_path") else None
+            technical_qs.append(q)
+    conn.close()
 
-            # Generate behavioral questions from resume
-            behavioral_qs = ai.generate_behavioral_questions(
-                req.resume_text, req.job_description, num_behavioral
-            )
+    # Generate behavioral questions from resume
+    behavioral_qs = ai.generate_behavioral_questions(
+        req.resume_text, req.job_description, num_behavioral
+    )
 
-            # Generate TTS for behavioral questions (store per-session)
-            for i, q in enumerate(behavioral_qs):
-                audio_filename = f"{session_id}_b{i}.mp3"
-                audio_path = os.path.join(AUDIO_DIR, audio_filename)
-                tts_ok = ai.generate_and_store_tts(q.get("voice_text") or q["question"], audio_path)
-                q["audio_url"] = f"/audio/{audio_filename}" if tts_ok else None
-                q["type"] = "behavioral"
+    # Generate TTS for behavioral questions (store per-session)
+    for i, q in enumerate(behavioral_qs):
+        audio_filename = f"{session_id}_b{i}.mp3"
+        audio_path = os.path.join(AUDIO_DIR, audio_filename)
+        tts_ok = ai.generate_and_store_tts(q.get("voice_text") or q["question"], audio_path)
+        q["audio_url"] = f"/audio/{audio_filename}" if tts_ok else None
+        q["type"] = "behavioral"
 
-            # Interleave: shuffle technical, append behavioral at end
-            random.shuffle(technical_qs)
-            questions = technical_qs + behavioral_qs
-        else:
-            # Job setup not ready — fall back to generating everything
-            questions = ai.generate_questions(
-                req.resume_text, req.job_description,
-                req.difficulty, req.num_questions, None
-            )
-    else:
-        # No job_id — old flow, generate everything
-        questions = ai.generate_questions(
-            req.resume_text, req.job_description,
-            req.difficulty, req.num_questions, None
-        )
+    # Shuffle technical, append behavioral at end
+    random.shuffle(technical_qs)
+    questions = technical_qs + behavioral_qs
 
     conn = get_conn()
     conn.execute(
