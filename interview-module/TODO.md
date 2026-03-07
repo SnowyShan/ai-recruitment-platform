@@ -1,5 +1,5 @@
 # TalentBridge — Interview Module TODO
-*Last updated: March 7, 2026*
+*Last updated: March 7, 2026 (afternoon)*
 *Use this file to come up to speed on the project before making changes.*
 
 ---
@@ -50,7 +50,7 @@ cd interview-module/frontend && npm run dev -- --port 5174
 
 - [x] **Task 1:** Question generation — Claude generates questions from resume + JD. Difficulty slider (1-5). Hardcoded question override supported. Behavioral questions derived from resume, technical from domain.
 - [x] **Task 2:** Answer evaluation — Full transcript sent to Claude at end of session (NOT per-answer). Configurable seniority bar (junior/mid/senior/staff). Hardcoded acceptable answer override supported.
-- [x] **Task 3:** Voice input — Web Speech API (Chrome only). Questions shown one at a time. Auto-recording starts on each new question. Manual "Next" button to advance.
+- [x] **Task 3:** Voice input — ~~Web Speech API (Chrome only)~~ → **MediaRecorder + OpenAI Whisper on all platforms** (see Recent Fixes). Questions shown one at a time. Recording starts automatically after each question's TTS audio ends. Tap Next when done — answer is transcribed and saved before advancing. One clip per question. Works on iOS (Chrome + Safari), Android Chrome, desktop Chrome/Firefox/Safari.
 - [x] **Task 4:** Auto-terminate — Countdown timer. When time expires, 2-minute wrap-up window given. After wrap-up, session auto-completes.
 - [x] **Task 5:** Report generation — Full transcript + questions sent to Claude in one batch call at session end. Detailed report: per-question scores, overall pass/fail, strengths, weaknesses. Report POSTed back to TalentBridge and stored. Recruiter can view via "View Report" in JobDetail.
 - [x] **Task 6 Phase 1:** Browser TTS (speechSynthesis) — questions read aloud via `window.speechSynthesis`, mute toggle, replay button, Chrome keepalive fix, Safari restart bug fixed (keepalive disabled on non-Chrome), auto-record starts after speech ends.
@@ -119,17 +119,9 @@ cd interview-module/frontend && npm run dev -- --port 5174
 
 ---
 
-### V3 — Task 8 (from PRODUCT.md): Replace Web Speech API with Whisper
+### ~~V3 — Task 8 (from PRODUCT.md): Replace Web Speech API with Whisper~~ ✅ DONE
 
-**What:** Server-side STT so interview works in Firefox/Safari and transcripts are stored server-side.
-
-**Plan:**
-- Send audio blob to backend after each answer
-- Backend transcribes via OpenAI Whisper API
-- Return transcript text to frontend
-- Eliminates Chrome-only limitation
-
-**Effort:** High — significant frontend + backend changes
+**Completed March 7, 2026.** All platforms now use MediaRecorder + Whisper. See Recent Fixes below.
 
 ---
 
@@ -171,7 +163,7 @@ cd interview-module/frontend && npm run dev -- --port 5174
 
 1. **Per-answer `/answer` endpoint exists but is unused by frontend** — frontend calls `/complete` at the end with full transcript. The `/answer` endpoint can be removed or kept for future use (e.g. follow-up logic in V3).
 
-2. **Web Speech API is Chrome-only** — noted, will be replaced by Whisper in V3.
+2. ~~**Web Speech API is Chrome-only**~~ — **Resolved March 7.** All platforms now use MediaRecorder + Whisper. See Recent Fixes.
 
 3. **No candidate authentication** — invite token is the only auth mechanism. By design (see PRODUCT.md — candidate auth is out of scope for interview module, handled by TalentBridge invite link).
 
@@ -181,7 +173,13 @@ cd interview-module/frontend && npm run dev -- --port 5174
 
 ---
 
-## Recent Fixes (post March 5)
+## Recent Fixes (post March 5, updated March 7)
+
+- **All-platform Whisper transcription** — Web Speech API removed entirely. All platforms (iOS, Android, desktop) now use `MediaRecorder` to capture one audio clip per question, sent to a new `POST /api/interview/transcribe` backend endpoint (OpenAI Whisper-1). Mic stream acquired once at "Allow Microphone" and reused for the whole interview. No live transcript shown — clean question-only UI. Transcript box removed. Next/Skip/End all async: stop recording → Whisper → store → advance. (`74dbda3`, `bd321ed`, `a4b56c9`)
+- **Double-transcription guard on last question** — when user taps Next on the final question, `nextQuestion()` transcribes and stores before calling `advance()→finish()`. Added guard in `finish()` to skip re-transcription if index already stored. (`a4b56c9`)
+- **Skip/End-early transcript correctness** — skipped questions stored as `[SKIPPED]`; unvisited questions (end early) stored as `(no answer)`. Verified via 5-scenario × 5-run test suite. (`a4b56c9`, `54a32ff`)
+- **Persistent mic stream** — `micStreamRef` keeps the `getUserMedia` stream alive for entire interview; `MediaRecorder` creates a new instance per question without re-requesting permission. (`bd321ed`)
+- **Browser compatibility note on instructions screen** — softened to grey footnote: "Best experienced on Chrome, Edge, or Safari on macOS." (`073974f`)
 
 - **Duplicate transcript entries** — Web Speech API race condition causing duplicate `onresult` events written to transcript. Fixed by deduplicating on result index (`0b717fe`, `d8c2a32`).
 - **Per-question report deduplication** — fixed duplicate entries in evaluation report (`d8c2a32`).
