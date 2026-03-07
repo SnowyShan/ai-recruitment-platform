@@ -291,6 +291,17 @@ async def publish_job(
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
 
+    # Auto-trigger setup for old jobs that were never set up
+    if job.setup_status is None:
+        job.setup_status = "generating"
+        job.domain = job.domain or _infer_domain(job.title)
+        db.commit()
+        _trigger_job_setup(job, [])
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Interview questions are being set up for this job. Please wait a moment and try again."
+        )
+
     if job.setup_status == "generating":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

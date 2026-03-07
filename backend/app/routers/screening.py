@@ -97,6 +97,18 @@ async def create_screening(
     # Resolve job now so we can check setup_status
     job = application.job
 
+    # Auto-trigger setup for old jobs that were never set up
+    if job.setup_status is None:
+        from .jobs import _infer_domain, _trigger_job_setup
+        job.setup_status = "generating"
+        job.domain = job.domain or _infer_domain(job.title)
+        db.commit()
+        _trigger_job_setup(job, [])
+        raise HTTPException(
+            status_code=400,
+            detail="Interview questions are being set up for this job for the first time. Please wait a moment and try again."
+        )
+
     # Block if job questions are still being generated
     if job.setup_status == "generating":
         raise HTTPException(

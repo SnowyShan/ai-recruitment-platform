@@ -585,8 +585,10 @@ export default function JobDetail() {
         ]);
         const jobData = jobRes.data;
         setJob(jobData);
-        setSetupStatus(jobData.setup_status);
-        if (jobData.setup_status === 'generating') {
+        // Treat null (never set up) the same as 'generating' — backend will auto-trigger setup
+        const effectiveStatus = jobData.setup_status ?? 'generating';
+        setSetupStatus(effectiveStatus);
+        if (effectiveStatus === 'generating') {
           startSetupPolling(id);
         }
       } catch (err) {

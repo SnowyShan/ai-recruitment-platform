@@ -183,7 +183,7 @@ const Jobs = () => {
                     View
                   </Link>
                   {job.status === 'draft' && (
-                    job.setup_status === 'generating' ? (
+                    (job.setup_status === 'generating' || job.setup_status === null) ? (
                       <div className="flex-1 flex items-center gap-1.5 justify-center py-2 px-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm font-medium cursor-not-allowed">
                         <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
                         <span className="truncate">Generating…</span>
