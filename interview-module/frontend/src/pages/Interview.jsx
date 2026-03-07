@@ -200,14 +200,19 @@ export default function Interview() {
 
   const audioRef = useRef(null)   // current playing HTMLAudioElement
   const ttsGenRef = useRef(0)     // incremented on every cancel — stale axios responses self-discard
+  const finishedRef = useRef(false) // set true after finish() — blocks any further audio/recording
 
   const cancelSpeech = () => {
     ttsGenRef.current++            // invalidate any in-flight TTS requests
     ttsCancelRef.current = true
     clearInterval(ttsKeepaliveRef.current)
     if (audioRef.current) {
+      // Clear handlers BEFORE touching src — prevents stale onended from firing
+      audioRef.current.onended = null
+      audioRef.current.onerror = null
       audioRef.current.pause()
       audioRef.current.src = ''
+      try { audioRef.current.load() } catch (_) {}  // force-abort iOS audio pipeline
       audioRef.current = null
     }
     window.speechSynthesis?.cancel()
@@ -226,28 +231,24 @@ export default function Interview() {
 
     // Use pre-fetched audio if available (Q0 is pre-fetched during instructions screen)
     const playBlob = (blobUrl) => {
-      if (ttsGenRef.current !== gen) { URL.revokeObjectURL(blobUrl); return }  // stale — discard
+      if (ttsGenRef.current !== gen || finishedRef.current) { URL.revokeObjectURL(blobUrl); return }
       const audio = new Audio(blobUrl)
       audioRef.current = audio
-      audio.onended = () => {
+      const done = () => {
         URL.revokeObjectURL(blobUrl)
         audioRef.current = null
         setIsSpeaking(false)
-        if (ttsGenRef.current === gen) startRecording()
+        if (ttsGenRef.current === gen && !finishedRef.current) startRecording()
       }
-      audio.onerror = () => {
-        URL.revokeObjectURL(blobUrl)
-        audioRef.current = null
-        setIsSpeaking(false)
-        if (ttsGenRef.current === gen) startRecording()
-      }
+      audio.onended = done
+      audio.onerror = done
       audio.play()
         .then(() => { if (ttsGenRef.current === gen) setIsSpeaking(true) })
         .catch(() => {
           URL.revokeObjectURL(blobUrl)
           audioRef.current = null
           setIsSpeaking(false)
-          if (ttsGenRef.current === gen) startRecording()
+          if (ttsGenRef.current === gen && !finishedRef.current) startRecording()
         })
     }
 
@@ -295,8 +296,12 @@ export default function Interview() {
         utterance.rate = 0.92
         const voice = getBestVoice()
         if (voice) utterance.voice = voice
-        utterance.onend = () => { setIsSpeaking(false); if (!ttsCancelRef.current) startRecording() }
-        utterance.onerror = () => { setIsSpeaking(false); if (!ttsCancelRef.current) startRecording() }
+        const synthDone = () => {
+          setIsSpeaking(false)
+          if (ttsGenRef.current === gen && !ttsCancelRef.current && !finishedRef.current) startRecording()
+        }
+        utterance.onend = synthDone
+        utterance.onerror = synthDone
         window.speechSynthesis.speak(utterance)
       })
     } // end fetchViaTTS
@@ -425,6 +430,7 @@ export default function Interview() {
   }
 
   const finish = useCallback(async () => {
+    finishedRef.current = true         // block any further audio/recording
     const answer = transcriptRef.current  // capture before stop clears it
     clearInterval(timerRef.current)
     cancelSpeech()
