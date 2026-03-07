@@ -510,7 +510,7 @@ export default function Interview() {
           </ul>
 
           <p className="text-xs text-slate-400 text-center">
-            Best experienced on Chrome, Edge, or Safari on macOS. Voice transcription is not supported on iPhone or iPad.
+            Best experienced on Chrome, Edge, or Safari on macOS.
           </p>
 
           {introPhase === 'intro' && (
