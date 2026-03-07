@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse
+from fastapi import UploadFile, File
 from pydantic import BaseModel
 from typing import Optional
-import uuid, json, os, httpx, io, math, random
+import uuid, json, os, httpx, io, tempfile, math, random
 from datetime import datetime
 from .database import get_conn, AUDIO_DIR
 from . import claude_client as ai
@@ -245,6 +246,37 @@ def synthesize_speech(req: TTSRequest):
     )
     audio_bytes = response.read()
     return StreamingResponse(io.BytesIO(audio_bytes), media_type="audio/mpeg")
+
+
+@tts_router.post("/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """Transcribe audio using OpenAI Whisper. Used as fallback on iOS Safari
+    where Web Speech API recognition is not available."""
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="Transcription not configured")
+    audio_bytes = await file.read()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio file")
+
+    # Determine file extension from content type (iOS sends audio/mp4)
+    content_type = file.content_type or "audio/webm"
+    ext = "m4a" if "mp4" in content_type or "m4a" in content_type else "webm"
+
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as tmp:
+        tmp.write(audio_bytes)
+        tmp_path = tmp.name
+    try:
+        with open(tmp_path, "rb") as f:
+            result = client.audio.transcriptions.create(model="whisper-1", file=f)
+        return {"text": result.text or ""}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
 
 
 # ── Sessions ───────────────────────────────────────────────────────────────────
