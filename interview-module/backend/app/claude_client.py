@@ -57,13 +57,16 @@ Return ONLY a JSON array like:
     start, end = text.find("["), text.rfind("]") + 1
     questions = json.loads(text[start:end])
 
-    # Post-process: deduplicate by topic as a safety net
+    # Post-process: deduplicate by both topic AND question text as a safety net
     seen_topics = set()
+    seen_questions = set()
     deduped = []
     for q in questions:
         topic_key = q.get("topic", "").lower().strip()
-        if topic_key not in seen_topics:
+        question_key = q.get("question", "").lower().strip()
+        if topic_key not in seen_topics and question_key not in seen_questions:
             seen_topics.add(topic_key)
+            seen_questions.add(question_key)
             deduped.append(q)
     return deduped[:num_questions]
 
@@ -221,4 +224,16 @@ Return ONLY valid JSON in this exact format:
     )
     text = resp.content[0].text.strip()
     start, end = text.find("{"), text.rfind("}") + 1
-    return json.loads(text[start:end])
+    result = json.loads(text[start:end])
+
+    # Deduplicate per_question entries — Claude occasionally repeats questions
+    seen_pq: set = set()
+    deduped_pq = []
+    for pq in result.get("per_question", []):
+        key = pq.get("question", "").lower().strip()
+        if key not in seen_pq:
+            seen_pq.add(key)
+            deduped_pq.append(pq)
+    result["per_question"] = deduped_pq
+
+    return result
