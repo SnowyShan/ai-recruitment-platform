@@ -56,6 +56,7 @@ export default function Interview() {
   const transcriptRef = useRef('')
   const fullTranscriptRef = useRef('')
   const questionAnswersRef = useRef({}) // live per-question answer map, updated on every onresult
+  const committedRef = useRef(new Set()) // question indices already written to fullTranscriptRef
   const finishRef = useRef(null)
   const currentIndexRef = useRef(0)
   const questionsRef = useRef(questions)
@@ -315,23 +316,29 @@ export default function Interview() {
 
   const commitToTranscript = (answerText, skipped = false) => {
     const idx = currentIndexRef.current
+    // Guard: never commit the same question index twice.
+    // Web Speech API .stop() is async — onresult can fire after stopRecording(),
+    // re-populating questionAnswersRef[idx] after we already committed it.
+    if (committedRef.current.has(idx)) return
     const q = questionsRef.current[idx]
     if (!q) return
+    committedRef.current.add(idx)
     const marker = `[Q${idx + 1}: ${q.question}]\n`
     // Prefer the live-accumulated answer over the point-in-time capture
     const bestAnswer = skipped ? '[SKIPPED]' : (questionAnswersRef.current[idx] || answerText || '').trim() || '(no answer)'
     const answer = `${bestAnswer}\n`
     fullTranscriptRef.current += `${marker}${answer}\n`
-    // Mark this question as committed so we don't double-count it
-    if (!skipped) delete questionAnswersRef.current[idx]
+    delete questionAnswersRef.current[idx]
   }
 
   // Build full transcript from any uncommitted answers still in questionAnswersRef
   const buildFinalTranscript = () => {
     const qs = questionsRef.current
-    // Commit any remaining uncommitted answers
+    // Commit any remaining uncommitted answers (questions not yet advanced through)
     qs.forEach((q, idx) => {
+      if (committedRef.current.has(idx)) return  // already committed — skip
       if (questionAnswersRef.current[idx] !== undefined) {
+        committedRef.current.add(idx)
         const marker = `[Q${idx + 1}: ${q.question}]\n`
         fullTranscriptRef.current += `${marker}${questionAnswersRef.current[idx].trim()}\n\n`
         delete questionAnswersRef.current[idx]
