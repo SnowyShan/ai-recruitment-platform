@@ -61,6 +61,11 @@ export default function Interview() {
   const currentIndexRef = useRef(0)
   const questionsRef = useRef(questions)
 
+  // Guard: track which question index we've already initiated speaking for.
+  // Prevents the speak effect from re-triggering when `questions` state arrives
+  // from the API mid-interview (candidates who open via direct URL with no state).
+  const spokenIndexRef = useRef(-1)
+
   // TTS state
   const [ttsEnabled, setTtsEnabled] = useState(getTTSEnabled)
   const [isSpeaking, setIsSpeaking] = useState(false)
@@ -311,10 +316,14 @@ export default function Interview() {
   useEffect(() => {
     if (!micReady || !started) return
     if (questions.length === 0) return
-    transcriptRef.current = ''
-    setTranscript('')
     const q = questions[currentIndex]
     if (!q) return
+    // Guard: only speak each question index once. Prevents re-triggering when
+    // `questions` state updates mid-interview (API fetch completing after start).
+    if (spokenIndexRef.current === currentIndex) return
+    spokenIndexRef.current = currentIndex
+    transcriptRef.current = ''
+    setTranscript('')
     speakThenRecord(q?.voice_text || q?.question || '')
   }, [currentIndex, questions, speakThenRecord, micReady, started])
 
@@ -323,6 +332,7 @@ export default function Interview() {
     if (!q) return
     cancelSpeech()
     stopRecording()
+    spokenIndexRef.current = -1  // allow replay to re-trigger the speak guard
     speakThenRecord(q.voice_text || q.question)
   }
 
@@ -365,6 +375,7 @@ export default function Interview() {
 
   const stopRecording = () => {
     if (recognitionRef.current) {
+      recognitionRef.current.onresult = null  // prevent stale final result from polluting next question
       recognitionRef.current.onend = null
       try { recognitionRef.current.stop() } catch (_) {}
       recognitionRef.current = null
