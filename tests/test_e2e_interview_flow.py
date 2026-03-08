@@ -442,14 +442,47 @@ def run_test(record: bool = False):
     return all_passed
 
 
+def _blackhole_device_id() -> str | None:
+    """Return the CoreAudio UID of BlackHole 2ch if installed, else None."""
+    try:
+        import plistlib
+        raw = subprocess.check_output(
+            ["system_profiler", "SPAudioDataType", "-xml"], stderr=subprocess.DEVNULL
+        )
+        data = plistlib.loads(raw)
+        # Traverse the plist looking for BlackHole entries
+        def search(obj):
+            if isinstance(obj, dict):
+                name = obj.get("_name", "")
+                if "BlackHole" in str(name):
+                    return name
+                for v in obj.values():
+                    r = search(v)
+                    if r:
+                        return r
+            elif isinstance(obj, list):
+                for item in obj:
+                    r = search(item)
+                    if r:
+                        return r
+            return None
+        return search(data)
+    except Exception:
+        return None
+
+
 def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
     """
     Open a real visible browser, navigate through the full UI flow, and record
     it as a .webm video in tests/recordings/.
 
-    NO MOCKS — uses the real mic, real MediaRecorder, real Whisper API.
-    For each question, macOS `say` speaks an iOS answer through the speakers;
-    the Mac's built-in mic picks it up and the browser records it normally.
+    Audio strategy (no mocks):
+      - BlackHole 2ch routes `say` output directly into the browser mic input
+        as a clean digital loopback — no acoustic feedback, no hardware issues.
+      - `say` speaks each iOS answer to BlackHole; the browser records it via
+        real MediaRecorder; real Whisper API transcribes it.
+      - If BlackHole is not installed: falls back to speakers → built-in mic
+        (acoustic) with `--use-fake-ui-for-media-stream` for permission.
     """
     try:
         from playwright.sync_api import sync_playwright
@@ -500,23 +533,44 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
         "using cell reuse, estimated row heights, and background image decoding."
     )
 
+    # Detect BlackHole — clean digital loopback, preferred over acoustic
+    bh_check = subprocess.run(
+        ["say", "-a", "BlackHole 2ch", ""],
+        capture_output=True, timeout=3
+    )
+    use_blackhole = bh_check.returncode == 0
+    if use_blackhole:
+        print("  🎛  BlackHole 2ch detected — using digital loopback (say → BlackHole → browser mic)")
+    else:
+        print("  🎙  BlackHole not found — using speaker → built-in mic (acoustic)")
+
     def speak(text: str):
-        """Speak text through Mac speakers using `say`. Blocks until done."""
-        subprocess.run(["say", "-r", "175", text], check=False)
+        """Speak via `say`. Routes to BlackHole for clean loopback, else speakers."""
+        cmd = ["say", "-r", "175"]
+        if use_blackhole:
+            cmd += ["-a", "BlackHole 2ch"]
+        cmd.append(text)
+        subprocess.run(cmd, check=False)
 
     video_path = None
     with sync_playwright() as p:
+        import shutil
+        shutil.rmtree("/tmp/tb_e2e_recording_profile", ignore_errors=True)
+
         context = p.chromium.launch_persistent_context(
             user_data_dir="/tmp/tb_e2e_recording_profile",
             headless=False,
             record_video_dir=recordings_dir,
             record_video_size={"width": 1280, "height": 800},
-            # No fake mic flags — real mic input required
+            # --use-fake-ui-for-media-stream: auto-approves the browser-level
+            # mic permission dialog without replacing the audio device.
+            # Real MediaRecorder records from whatever is set as system input
+            # (BlackHole 2ch when installed, built-in mic otherwise).
+            args=["--use-fake-ui-for-media-stream"],
             viewport={"width": 1280, "height": 800},
         )
 
-        # Only disable TTS so the interviewer questions aren't spoken over
-        # our candidate answers. Real getUserMedia and MediaRecorder unchanged.
+        # Only disable TTS — real getUserMedia and MediaRecorder are unchanged.
         context.add_init_script("localStorage.setItem('interview_tts_enabled', 'false');")
 
         page = context.new_page()

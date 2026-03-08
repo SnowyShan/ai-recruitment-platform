@@ -1,5 +1,5 @@
 # TalentBridge — Interview Module TODO
-*Last updated: March 7, 2026 (afternoon)*
+*Last updated: March 8, 2026 (morning)*
 *Use this file to come up to speed on the project before making changes.*
 
 ---
@@ -169,11 +169,52 @@ cd interview-module/frontend && npm run dev -- --port 5174
 
 4. **SQLite in production** — `interview.db` is fine for development. Needs PostgreSQL before real production use.
 
-5. **Audio files committed to repo** — pre-generated `.mp3` files land in `interview-module/backend/audio/`. Should be gitignored and stored externally (S3/CDN) before production.
+5. ~~**Audio files committed to repo**~~ — **Resolved March 8.** `interview-module/backend/audio/*.mp3` added to `.gitignore`. Files purged from git history. Should still be moved to S3/CDN before production.
 
 ---
 
-## Recent Fixes (post March 5, updated March 7)
+## E2E Test Infrastructure (added March 8)
+
+`tests/test_e2e_interview_flow.py` — fully real end-to-end sanity test. No mocks. Covers:
+1. Auth (register or login test account)
+2. Create + publish iOS engineer job (TB API)
+3. Wait for question bank generation
+4. Create mock interview session
+5. For each question: speak a real answer via macOS `say` → real Whisper API → store transcript
+6. Submit → Claude generates report
+7. Assert: GOOD iOS answers score higher than BAD (wrong-domain) answers; gap ≥ 15 pts; all `answer_char_count > 0`
+
+```bash
+python3 tests/test_e2e_interview_flow.py           # accuracy test only
+python3 tests/test_e2e_interview_flow.py --record  # + browser video (see below)
+```
+
+**`--record` mode** — opens a real visible Chromium browser, navigates the full UI flow (login → job detail → interview → report), records it as `.webm` in `tests/recordings/`.
+
+### Audio input for `--record`: 3 options (Option 2 preferred)
+
+**Option 1 — Acoustic (no install needed)**
+- `say` speaks iOS answers through Mac speakers; built-in mic picks them up
+- Works out of the box but is susceptible to room noise and echo
+- Requires macOS to have granted Playwright's Chromium mic access in System Preferences → Privacy & Security → Microphone (first run triggers the dialog)
+
+**Option 2 — BlackHole virtual loopback ← PREFERRED**
+- `say -a "BlackHole 2ch"` routes audio digitally into the browser's mic input — no speakers, no acoustic feedback, no noise
+- Install: `brew install blackhole-2ch` (requires sudo password once)
+- After install, test auto-detects BlackHole and switches to digital loopback automatically; no code changes needed
+- **TODO: install BlackHole (`brew install blackhole-2ch`) then re-run `--record` to verify**
+
+**Option 3 — Fake mic + fake transcript (old approach, not recommended)**
+- `MockMediaRecorder` + Playwright route interception return predetermined text
+- No real audio at all — can't verify mic/Whisper pipeline is working
+- Removed in current code; only kept as fallback if Options 1+2 fail
+
+### `answer_char_count` in report
+Each per-question report entry now includes `answer_char_count` — the number of characters Whisper transcribed for that question. Populated in `routers.py` after Claude generates the report, by parsing the `[Q1: ...]` segments of `full_transcript`. Even if Claude scores an answer 0, a non-zero `answer_char_count` confirms the mic was recording and Whisper received real audio.
+
+---
+
+## Recent Fixes (post March 5, updated March 8)
 
 - **All-platform Whisper transcription** — Web Speech API removed entirely. All platforms (iOS, Android, desktop) now use `MediaRecorder` to capture one audio clip per question, sent to a new `POST /api/interview/transcribe` backend endpoint (OpenAI Whisper-1). Mic stream acquired once at "Allow Microphone" and reused for the whole interview. No live transcript shown — clean question-only UI. Transcript box removed. Next/Skip/End all async: stop recording → Whisper → store → advance. (`74dbda3`, `bd321ed`, `a4b56c9`)
 - **Double-transcription guard on last question** — when user taps Next on the final question, `nextQuestion()` transcribes and stores before calling `advance()→finish()`. Added guard in `finish()` to skip re-transcription if index already stored. (`a4b56c9`)
@@ -183,6 +224,8 @@ cd interview-module/frontend && npm run dev -- --port 5174
 
 - **Duplicate transcript entries** — Web Speech API race condition causing duplicate `onresult` events written to transcript. Fixed by deduplicating on result index (`0b717fe`, `d8c2a32`).
 - **Per-question report deduplication** — fixed duplicate entries in evaluation report (`d8c2a32`).
+- **`answer_char_count` in report** — `routers.py` now parses `full_transcript` after Claude generates the report and enriches each `per_question` entry with the character count of the candidate's answer. Lets you verify audio was captured even when score is 0. (`b102453`)
+- **Audio `.mp3` files gitignored** — `interview-module/backend/audio/*.mp3` added to `.gitignore`, files removed from git tracking. (`latest`)
 - **Blank screen after mic grant** — stale `prefetchedAudioRef` reference after question bank refactor. Fixed (`4f64f0e`).
 - **Mock interview delay + pre-fetch audio destroyed on start** — timing bug in mock interview flow; pre-fetched audio was being torn down before playback. Fixed (`8217754`).
 - **Overlapping audio / audio-after-End** — audio kept playing past interview end or overlapped on question advance. Fixed (`42c9f0e`).

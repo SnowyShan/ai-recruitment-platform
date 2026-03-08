@@ -58,3 +58,4 @@ logs/
 *.sqlite3
 
 tests/recordings/
+interview-module/backend/audio/*.mp3
