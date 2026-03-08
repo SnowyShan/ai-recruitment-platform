@@ -598,8 +598,16 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
             if is_last:
                 break
 
-        # Wait on final state (report redirect or finishing screen)
-        interview_page.wait_for_timeout(2000)
+        # Wait for "Submitting…" spinner then report redirect
+        print("    Waiting for report to generate…", end="", flush=True)
+        try:
+            interview_page.wait_for_url("**/report/**", timeout=90_000)
+            print(" ✅")
+        except Exception:
+            print(" (timeout — still showing final state)")
+
+        # Pause on report page so it's visible in the recording
+        interview_page.wait_for_timeout(4000)
 
         # Grab video path before closing
         video_path = interview_page.video.path() if interview_page.video else None
