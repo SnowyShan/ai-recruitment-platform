@@ -48,6 +48,7 @@ import requests
 # ── Config ────────────────────────────────────────────────────────────────────
 
 TB_API        = "http://localhost:8000"
+TB_URL        = "http://localhost:5173"
 INTERVIEW_API = "http://localhost:8001"
 
 TEST_EMAIL    = "e2e-test@gmail.com"
@@ -255,9 +256,11 @@ def whisper_transcribe(audio_path):
 
 # ── Test ──────────────────────────────────────────────────────────────────────
 
-def run_test():
+def run_test(record: bool = False):
     print("\n" + "=" * 60)
     print("TalentBridge E2E Sanity Test — Core Interview Flow")
+    if record:
+        print("  [--record] Browser recording enabled")
     print("=" * 60 + "\n")
 
     # ── Step 1: Services ───────────────────────────────────────────────────
@@ -278,6 +281,14 @@ def run_test():
     if not wait_for_setup(job_id, token):
         print("  Question bank not ready — aborting.")
         return False
+
+    # Optional browser recording (visual demo — runs before accuracy test)
+    if record:
+        print("\n[Recording] Launching browser…")
+        video = record_ui_flow(job_id, token, num_questions=4)
+        if not video:
+            print("  Recording failed or playwright not installed — continuing with API test.")
+        print()
 
     # Publish now that setup is ready
     if job.get("status") != "published":
@@ -430,6 +441,179 @@ def run_test():
     return all_passed
 
 
+def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
+    """
+    Open a real visible browser, navigate through the full UI flow, and record
+    it as a .webm video in tests/recordings/.
+
+    Separate from the accuracy test — this is purely for visual verification.
+    The browser creates its own session (same job). Transcription is intercepted
+    to return known answers so the flow completes cleanly on screen.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  playwright not installed — run: pip install playwright && playwright install chromium")
+        return None
+
+    import datetime
+    recordings_dir = os.path.join(os.path.dirname(__file__), "recordings")
+    os.makedirs(recordings_dir, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    video_name = f"interview_flow_{timestamp}"
+
+    headers = {"Authorization": f"Bearer {token}"}
+    job_resp = requests.get(f"{TB_API}/api/jobs/{job_id}", headers=headers)
+    job = job_resp.json()
+    jd = "\n\n".join(filter(None, [job.get("description"), job.get("requirements")]))
+
+    # Create a fresh session for the browser recording
+    sess = requests.post(f"{INTERVIEW_API}/api/interview/session", json={
+        "job_description": jd or job["title"],
+        "resume_text": "Mock candidate for visual E2E recording.",
+        "difficulty": 2, "seniority_bar": "senior", "time_limit": 45,
+        "num_questions": num_questions, "behavioral_pct": 25, "job_id": job_id,
+    })
+    sess.raise_for_status()
+    session_id  = sess.json()["session_id"]
+    questions   = sess.json()["questions"]
+    print(f"  Recording session: {session_id}")
+
+    call_count = [0]
+    def handle_transcribe(route):
+        idx = call_count[0]; call_count[0] += 1
+        text = get_good_answer(idx // 2) if idx % 2 == 0 else get_bad_answer(idx // 2)
+        route.fulfill(status=200, content_type="application/json",
+                      body=json.dumps({"text": text}))
+
+    video_path = None
+    with sync_playwright() as p:
+        context = p.chromium.launch_persistent_context(
+            user_data_dir="/tmp/tb_e2e_recording_profile",
+            headless=False,
+            record_video_dir=recordings_dir,
+            record_video_size={"width": 1280, "height": 800},
+            args=["--use-fake-ui-for-media-stream",
+                  "--use-fake-device-for-media-stream"],
+            viewport={"width": 1280, "height": 800},
+        )
+
+        # Inject: disable TTS + mock getUserMedia (silent stream for recording)
+        context.add_init_script("""
+            localStorage.setItem('interview_tts_enabled', 'false');
+            if (navigator.mediaDevices) {
+                navigator.mediaDevices.getUserMedia = async () => {
+                    const ctx = new AudioContext();
+                    const dst = ctx.createMediaStreamDestination();
+                    return dst.stream;
+                };
+            }
+        """)
+
+        page = context.new_page()
+        page.route("**/api/interview/transcribe", handle_transcribe)
+
+        # Login
+        page.goto(f"{TB_URL}/login")
+        page.fill('input[type="email"]', TEST_EMAIL)
+        page.fill('input[type="password"]', TEST_PASSWORD)
+        page.click('button[type="submit"]')
+        page.wait_for_url("**/dashboard", timeout=15_000)
+        page.wait_for_timeout(600)
+
+        # Job Detail
+        page.goto(f"{TB_URL}/jobs/{job_id}")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(800)
+
+        # Expand config panel to show Mock Interview button
+        config_btn = page.query_selector("button:has-text('Screening Interview Config')")
+        if config_btn and not page.query_selector("button:has-text('Mock Interview')"):
+            config_btn.click()
+            page.wait_for_timeout(600)
+
+        # Scroll Mock Interview button into view and highlight briefly
+        mock_btn = page.query_selector("button:has-text('Mock Interview')")
+        if mock_btn:
+            mock_btn.scroll_into_view_if_needed()
+            page.wait_for_timeout(400)
+
+        # Navigate directly to interview (avoids cross-origin popup issues)
+        page.wait_for_timeout(400)
+        interview_page = context.new_page()
+        interview_page.route("**/api/interview/transcribe", handle_transcribe)
+        interview_page.add_init_script("""
+            localStorage.setItem('interview_tts_enabled', 'false');
+            if (navigator.mediaDevices) {
+                navigator.mediaDevices.getUserMedia = async () => {
+                    const ctx = new AudioContext();
+                    const dst = ctx.createMediaStreamDestination();
+                    return dst.stream;
+                };
+            }
+        """)
+        interview_page.goto(f"http://localhost:5174/interview/{session_id}")
+        interview_page.wait_for_load_state("networkidle")
+        interview_page.wait_for_timeout(800)
+
+        # Instructions screen
+        interview_page.click("button:has-text('Allow Microphone')", timeout=10_000)
+        interview_page.wait_for_selector("button:has-text('Tap to Begin')", timeout=10_000)
+        interview_page.wait_for_timeout(600)
+        interview_page.click("button:has-text('Tap to Begin')")
+        interview_page.wait_for_timeout(1000)
+
+        # Click through each question
+        for i in range(len(questions)):
+            try:
+                qlabel = interview_page.text_content("p:has-text('Question')", timeout=3_000)
+                print(f"    {qlabel.strip()}")
+            except Exception:
+                pass
+
+            # Pause to simulate thinking/answering
+            interview_page.wait_for_timeout(2500)
+
+            # Wait for buttons to be enabled
+            try:
+                interview_page.wait_for_selector(
+                    "button:has-text('Next →'):not([disabled]), button:has-text('Finish'):not([disabled])",
+                    timeout=15_000,
+                )
+            except Exception:
+                pass
+
+            is_last = interview_page.query_selector("button:has-text('Finish')") is not None
+            btn_text = "Finish" if is_last else "Next →"
+            interview_page.click(f"button:has-text('{btn_text}')")
+
+            # Wait for processing indicator to come and go
+            try:
+                interview_page.wait_for_selector("p:has-text('Processing')", timeout=5_000)
+                interview_page.wait_for_selector("p:has-text('Processing')",
+                                                  state="hidden", timeout=30_000)
+            except Exception:
+                pass
+
+            if is_last:
+                break
+
+        # Wait on final state (report redirect or finishing screen)
+        interview_page.wait_for_timeout(2000)
+
+        # Grab video path before closing
+        video_path = interview_page.video.path() if interview_page.video else None
+        context.close()
+
+    if video_path and os.path.exists(video_path):
+        final_path = os.path.join(recordings_dir, f"{video_name}.webm")
+        os.rename(video_path, final_path)
+        print(f"  Video saved: {final_path}")
+        return final_path
+    return None
+
+
 if __name__ == "__main__":
-    ok = run_test()
+    record = "--record" in sys.argv
+    ok = run_test(record=record)
     sys.exit(0 if ok else 1)

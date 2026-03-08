@@ -57,3 +57,4 @@ logs/
 *.sqlite
 *.sqlite3
 
+tests/recordings/
