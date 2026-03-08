@@ -479,12 +479,31 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
     questions   = sess.json()["questions"]
     print(f"  Recording session: {session_id}")
 
+    # For the recording we want the report to look good on screen —
+    # use a single broad answer that covers all common iOS topics so it
+    # scores reasonably regardless of which specific question is asked.
+    RECORDING_ANSWER = (
+        "In my five years of iOS development I have worked extensively with Swift "
+        "and UIKit at Apple and LinkedIn. I have deep knowledge of Automatic Reference "
+        "Counting — ARC tracks strong references and deallocates objects when the count "
+        "reaches zero. I use weak references to break retain cycles in delegate patterns "
+        "and closures. I model data with structs for value semantics and thread safety, "
+        "and classes when I need reference semantics or Objective-C interoperability. "
+        "For concurrency I use both Grand Central Dispatch and Swift async await. "
+        "GCD uses OS-managed thread pools while async await uses structured concurrency "
+        "with cooperative scheduling which is far more efficient. I profile apps with "
+        "Instruments using the Allocations, Leaks, and Time Profiler templates. "
+        "At my last role I resolved a critical retain cycle between a view controller "
+        "and a timer callback by breaking it with weak self, eliminating a two megabyte "
+        "per minute memory leak. I also improved scroll performance from forty to sixty "
+        "frames per second using cell reuse, estimated heights, and background image decoding."
+    )
+
     call_count = [0]
     def handle_transcribe(route):
-        idx = call_count[0]; call_count[0] += 1
-        text = get_good_answer(idx // 2) if idx % 2 == 0 else get_bad_answer(idx // 2)
+        call_count[0] += 1
         route.fulfill(status=200, content_type="application/json",
-                      body=json.dumps({"text": text}))
+                      body=json.dumps({"text": RECORDING_ANSWER}))
 
     video_path = None
     with sync_playwright() as p:
