@@ -394,10 +394,11 @@ def run_test(record: bool = False):
 
     for i, pq in enumerate(per_q):
         score    = pq.get("score", 0)
+        chars    = pq.get("answer_char_count", "n/a")
         is_good  = (i % 2 == 0)
         label    = "GOOD" if is_good else "BAD "
         feedback = pq.get("feedback", "")[:70]
-        print(f"  Q{i+1} [{label}] score={score:>3}/100 | {feedback}…")
+        print(f"  Q{i+1} [{label}] score={score:>3}/100 | chars={chars} | {feedback}…")
         (good_scores if is_good else bad_scores).append(score)
 
     avg_good = sum(good_scores) / len(good_scores) if good_scores else 0
@@ -446,9 +447,9 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
     Open a real visible browser, navigate through the full UI flow, and record
     it as a .webm video in tests/recordings/.
 
-    Separate from the accuracy test — this is purely for visual verification.
-    The browser creates its own session (same job). Transcription is intercepted
-    to return known answers so the flow completes cleanly on screen.
+    NO MOCKS — uses the real mic, real MediaRecorder, real Whisper API.
+    For each question, macOS `say` speaks an iOS answer through the speakers;
+    the Mac's built-in mic picks it up and the browser records it normally.
     """
     try:
         from playwright.sync_api import sync_playwright
@@ -456,7 +457,7 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
         print("  playwright not installed — run: pip install playwright && playwright install chromium")
         return None
 
-    import datetime
+    import datetime, threading
     recordings_dir = os.path.join(os.path.dirname(__file__), "recordings")
     os.makedirs(recordings_dir, exist_ok=True)
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -470,40 +471,38 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
     # Create a fresh session for the browser recording
     sess = requests.post(f"{INTERVIEW_API}/api/interview/session", json={
         "job_description": jd or job["title"],
-        "resume_text": "Mock candidate for visual E2E recording.",
+        "resume_text": "Candidate with 5 years iOS development experience at Apple and LinkedIn.",
         "difficulty": 2, "seniority_bar": "senior", "time_limit": 45,
         "num_questions": num_questions, "behavioral_pct": 25, "job_id": job_id,
     })
     sess.raise_for_status()
-    session_id  = sess.json()["session_id"]
-    questions   = sess.json()["questions"]
+    session_id = sess.json()["session_id"]
+    questions  = sess.json()["questions"]
     print(f"  Recording session: {session_id}")
 
-    # For the recording we want the report to look good on screen —
-    # use a single broad answer that covers all common iOS topics so it
-    # scores reasonably regardless of which specific question is asked.
-    RECORDING_ANSWER = (
-        "In my five years of iOS development I have worked extensively with Swift "
-        "and UIKit at Apple and LinkedIn. I have deep knowledge of Automatic Reference "
-        "Counting — ARC tracks strong references and deallocates objects when the count "
-        "reaches zero. I use weak references to break retain cycles in delegate patterns "
-        "and closures. I model data with structs for value semantics and thread safety, "
+    # Spoken answers played through Mac speakers → real mic captures them.
+    # Comprehensive iOS answer — covers ARC, concurrency, structs, profiling.
+    SPOKEN_ANSWER = (
+        "In my five years of iOS development, I have worked extensively with Swift "
+        "and UIKit at Apple and LinkedIn. "
+        "For memory management I rely on Automatic Reference Counting. "
+        "ARC tracks strong references and deallocates objects when the count reaches zero. "
+        "I always use weak references in delegate patterns and closures to break retain cycles. "
+        "For data modeling I prefer structs for value semantics and thread safety, "
         "and classes when I need reference semantics or Objective-C interoperability. "
         "For concurrency I use both Grand Central Dispatch and Swift async await. "
         "GCD uses OS-managed thread pools while async await uses structured concurrency "
-        "with cooperative scheduling which is far more efficient. I profile apps with "
-        "Instruments using the Allocations, Leaks, and Time Profiler templates. "
-        "At my last role I resolved a critical retain cycle between a view controller "
-        "and a timer callback by breaking it with weak self, eliminating a two megabyte "
-        "per minute memory leak. I also improved scroll performance from forty to sixty "
-        "frames per second using cell reuse, estimated heights, and background image decoding."
+        "which is more efficient and removes nested callback pyramids. "
+        "I profile apps with Instruments using the Allocations and Time Profiler templates. "
+        "At my last role I resolved a retain cycle between a view controller and a timer, "
+        "eliminating a two megabyte per minute memory leak using weak self. "
+        "I also improved scroll performance from 40 to 60 frames per second "
+        "using cell reuse, estimated row heights, and background image decoding."
     )
 
-    call_count = [0]
-    def handle_transcribe(route):
-        call_count[0] += 1
-        route.fulfill(status=200, content_type="application/json",
-                      body=json.dumps({"text": RECORDING_ANSWER}))
+    def speak(text: str):
+        """Speak text through Mac speakers using `say`. Blocks until done."""
+        subprocess.run(["say", "-r", "175", text], check=False)
 
     video_path = None
     with sync_playwright() as p:
@@ -512,60 +511,15 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
             headless=False,
             record_video_dir=recordings_dir,
             record_video_size={"width": 1280, "height": 800},
-            args=["--use-fake-ui-for-media-stream",
-                  "--use-fake-device-for-media-stream"],
+            # No fake mic flags — real mic input required
             viewport={"width": 1280, "height": 800},
         )
 
-        # Inject: disable TTS + mock getUserMedia + mock MediaRecorder so
-        # Interview.jsx gets a real non-empty blob and calls the transcribe
-        # endpoint (which we intercept to return our predetermined answers).
-        context.add_init_script("""
-            localStorage.setItem('interview_tts_enabled', 'false');
-
-            // Fake getUserMedia — returns a silent stream so the permission
-            // dialog is skipped without needing real mic hardware.
-            if (navigator.mediaDevices) {
-                navigator.mediaDevices.getUserMedia = async () => {
-                    const ctx = new AudioContext();
-                    const dst = ctx.createMediaStreamDestination();
-                    return dst.stream;
-                };
-            }
-
-            // Mock MediaRecorder — produces a non-empty blob on stop()
-            // so Interview.jsx always calls the transcribe endpoint.
-            class MockMediaRecorder extends EventTarget {
-                constructor(stream, options) {
-                    super();
-                    this.stream = stream;
-                    this.state = 'inactive';
-                    this.ondataavailable = null;
-                    this.onstop = null;
-                    this.mimeType = (options && options.mimeType) || 'audio/webm';
-                }
-                start() { this.state = 'recording'; }
-                stop() {
-                    this.state = 'inactive';
-                    // 2 KB of fake audio bytes — enough for a non-null blob
-                    const fakeData = new Uint8Array(2048).fill(128);
-                    const blob = new Blob([fakeData], { type: this.mimeType });
-                    const ev = new Event('dataavailable');
-                    ev.data = blob;
-                    if (this.ondataavailable) this.ondataavailable(ev);
-                    const self = this;
-                    setTimeout(() => {
-                        if (self.onstop) self.onstop(new Event('stop'));
-                        self.dispatchEvent(new Event('stop'));
-                    }, 30);
-                }
-                static isTypeSupported() { return true; }
-            }
-            window.MediaRecorder = MockMediaRecorder;
-        """)
+        # Only disable TTS so the interviewer questions aren't spoken over
+        # our candidate answers. Real getUserMedia and MediaRecorder unchanged.
+        context.add_init_script("localStorage.setItem('interview_tts_enabled', 'false');")
 
         page = context.new_page()
-        page.route("**/api/interview/transcribe", handle_transcribe)
 
         # Login
         page.goto(f"{TB_URL}/login")
@@ -575,7 +529,7 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
         page.wait_for_url("**/dashboard", timeout=15_000)
         page.wait_for_timeout(600)
 
-        # Job Detail
+        # Job Detail — show the job page briefly
         page.goto(f"{TB_URL}/jobs/{job_id}")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(800)
@@ -586,109 +540,72 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
             config_btn.click()
             page.wait_for_timeout(600)
 
-        # Scroll Mock Interview button into view and highlight briefly
         mock_btn = page.query_selector("button:has-text('Mock Interview')")
         if mock_btn:
             mock_btn.scroll_into_view_if_needed()
-            page.wait_for_timeout(400)
+            page.wait_for_timeout(500)
 
-        # Navigate directly to interview (avoids cross-origin popup issues)
-        page.wait_for_timeout(400)
+        # Navigate directly to interview page (same session_id created above)
+        page.wait_for_timeout(300)
         interview_page = context.new_page()
-        interview_page.route("**/api/interview/transcribe", handle_transcribe)
-        interview_page.add_init_script("""
-            localStorage.setItem('interview_tts_enabled', 'false');
-            if (navigator.mediaDevices) {
-                navigator.mediaDevices.getUserMedia = async () => {
-                    const ctx = new AudioContext();
-                    const dst = ctx.createMediaStreamDestination();
-                    return dst.stream;
-                };
-            }
-            class MockMediaRecorder extends EventTarget {
-                constructor(stream, options) {
-                    super();
-                    this.stream = stream;
-                    this.state = 'inactive';
-                    this.ondataavailable = null;
-                    this.onstop = null;
-                    this.mimeType = (options && options.mimeType) || 'audio/webm';
-                }
-                start() { this.state = 'recording'; }
-                stop() {
-                    this.state = 'inactive';
-                    const fakeData = new Uint8Array(2048).fill(128);
-                    const blob = new Blob([fakeData], { type: this.mimeType });
-                    const ev = new Event('dataavailable');
-                    ev.data = blob;
-                    if (this.ondataavailable) this.ondataavailable(ev);
-                    const self = this;
-                    setTimeout(() => {
-                        if (self.onstop) self.onstop(new Event('stop'));
-                        self.dispatchEvent(new Event('stop'));
-                    }, 30);
-                }
-                static isTypeSupported() { return true; }
-            }
-            window.MediaRecorder = MockMediaRecorder;
-        """)
+        interview_page.add_init_script(
+            "localStorage.setItem('interview_tts_enabled', 'false');"
+        )
         interview_page.goto(f"http://localhost:5174/interview/{session_id}")
         interview_page.wait_for_load_state("networkidle")
         interview_page.wait_for_timeout(800)
 
-        # Instructions screen
+        # Grant microphone and begin
         interview_page.click("button:has-text('Allow Microphone')", timeout=10_000)
-        interview_page.wait_for_selector("button:has-text('Tap to Begin')", timeout=10_000)
+        interview_page.wait_for_selector("button:has-text('Tap to Begin')", timeout=15_000)
         interview_page.wait_for_timeout(600)
         interview_page.click("button:has-text('Tap to Begin')")
         interview_page.wait_for_timeout(1000)
 
-        # Click through each question
+        # Answer each question: speak through speakers while browser records mic
         for i in range(len(questions)):
             try:
                 qlabel = interview_page.text_content("p:has-text('Question')", timeout=3_000)
-                print(f"    {qlabel.strip()}")
+                print(f"    {qlabel.strip()} — speaking answer…", end="", flush=True)
             except Exception:
-                pass
+                print(f"    Q{i+1} — speaking answer…", end="", flush=True)
 
-            # Pause to simulate thinking/answering
-            interview_page.wait_for_timeout(2500)
+            # Brief pause before speaking (realistic candidate think time)
+            interview_page.wait_for_timeout(800)
 
-            # Wait for buttons to be enabled
-            try:
-                interview_page.wait_for_selector(
-                    "button:has-text('Next →'):not([disabled]), button:has-text('Finish'):not([disabled])",
-                    timeout=15_000,
-                )
-            except Exception:
-                pass
+            # Speak answer through Mac speakers — mic picks it up in real-time
+            speak(SPOKEN_ANSWER)
+            print(" done speaking", end="", flush=True)
+
+            # Small gap after speaking, then click Next/Finish
+            interview_page.wait_for_timeout(500)
 
             is_last = interview_page.query_selector("button:has-text('Finish')") is not None
             btn_text = "Finish" if is_last else "Next →"
             interview_page.click(f"button:has-text('{btn_text}')")
+            print(f" → {btn_text}")
 
-            # Wait for processing indicator to come and go
+            # Wait for Whisper processing to complete
             try:
                 interview_page.wait_for_selector("p:has-text('Processing')", timeout=5_000)
                 interview_page.wait_for_selector("p:has-text('Processing')",
-                                                  state="hidden", timeout=30_000)
+                                                  state="hidden", timeout=60_000)
             except Exception:
                 pass
 
             if is_last:
                 break
 
-        # Wait for "Submitting…" spinner then report redirect
+        # Wait for Claude report
         print("    Waiting for report to generate…", end="", flush=True)
         try:
             interview_page.wait_for_url("**/report/**", timeout=90_000)
             print(" ✅")
         except Exception:
-            print(" (timeout — still showing final state)")
+            print(" (timeout)")
 
-        # Scroll through the report so per-question breakdown is visible
-        interview_page.wait_for_timeout(2000)  # let report render fully
-        # Scroll down slowly so the viewer can read each section
+        # Scroll through report so per-question breakdown is visible
+        interview_page.wait_for_timeout(2000)
         interview_page.evaluate("""
             () => new Promise(resolve => {
                 const totalHeight = document.body.scrollHeight;
@@ -699,14 +616,13 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
                     scrolled += step;
                     if (scrolled >= totalHeight) {
                         clearInterval(timer);
-                        setTimeout(resolve, 2000); // pause at bottom
+                        setTimeout(resolve, 2000);
                     }
-                }, 120); // scroll every 120ms → smooth, readable
+                }, 120);
             })
         """)
         interview_page.wait_for_timeout(1500)
 
-        # Grab video path before closing
         video_path = interview_page.video.path() if interview_page.video else None
         context.close()
 

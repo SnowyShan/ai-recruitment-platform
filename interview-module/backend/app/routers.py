@@ -418,6 +418,25 @@ def complete_session(session_id: str, req: CompleteRequest = CompleteRequest()):
     report = ai.generate_report_from_transcript(
         row["job_description"], row["resume_text"], questions, full_transcript, evaluation_prompt
     )
+
+    # Enrich per_question with answer_char_count extracted from full_transcript.
+    # Transcript format produced by Interview.jsx / test:
+    #   "[Q1: <question text>]\n<answer>\n\n[Q2: ...]"
+    import re as _re
+    segments: dict[int, str] = {}
+    # Match [Q<n>: ...] capturing everything between the bracket pairs
+    parts = _re.split(r'\[Q(\d+):[^\]]*\]', full_transcript)
+    # parts = ['', '1', '<answer1>', '2', '<answer2>', ...]
+    it = iter(parts[1:])  # skip leading empty string before first marker
+    for qnum_str, answer_text in zip(it, it):
+        segments[int(qnum_str)] = answer_text.strip()
+
+    for i, pq in enumerate(report.get("per_question", []), start=1):
+        answer_text = segments.get(i, "")
+        # Strip [SKIPPED] markers before counting
+        clean = answer_text.replace("[SKIPPED]", "").strip()
+        pq["answer_char_count"] = len(clean)
+
     conn.execute(
         "UPDATE sessions SET status='completed', report=?, completed_at=? WHERE id=?",
         (json.dumps(report), datetime.utcnow().isoformat(), session_id)
