@@ -517,9 +517,14 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
             viewport={"width": 1280, "height": 800},
         )
 
-        # Inject: disable TTS + mock getUserMedia (silent stream for recording)
+        # Inject: disable TTS + mock getUserMedia + mock MediaRecorder so
+        # Interview.jsx gets a real non-empty blob and calls the transcribe
+        # endpoint (which we intercept to return our predetermined answers).
         context.add_init_script("""
             localStorage.setItem('interview_tts_enabled', 'false');
+
+            // Fake getUserMedia — returns a silent stream so the permission
+            // dialog is skipped without needing real mic hardware.
             if (navigator.mediaDevices) {
                 navigator.mediaDevices.getUserMedia = async () => {
                     const ctx = new AudioContext();
@@ -527,6 +532,36 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
                     return dst.stream;
                 };
             }
+
+            // Mock MediaRecorder — produces a non-empty blob on stop()
+            // so Interview.jsx always calls the transcribe endpoint.
+            class MockMediaRecorder extends EventTarget {
+                constructor(stream, options) {
+                    super();
+                    this.stream = stream;
+                    this.state = 'inactive';
+                    this.ondataavailable = null;
+                    this.onstop = null;
+                    this.mimeType = (options && options.mimeType) || 'audio/webm';
+                }
+                start() { this.state = 'recording'; }
+                stop() {
+                    this.state = 'inactive';
+                    // 2 KB of fake audio bytes — enough for a non-null blob
+                    const fakeData = new Uint8Array(2048).fill(128);
+                    const blob = new Blob([fakeData], { type: this.mimeType });
+                    const ev = new Event('dataavailable');
+                    ev.data = blob;
+                    if (this.ondataavailable) this.ondataavailable(ev);
+                    const self = this;
+                    setTimeout(() => {
+                        if (self.onstop) self.onstop(new Event('stop'));
+                        self.dispatchEvent(new Event('stop'));
+                    }, 30);
+                }
+                static isTypeSupported() { return true; }
+            }
+            window.MediaRecorder = MockMediaRecorder;
         """)
 
         page = context.new_page()
@@ -570,6 +605,32 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
                     return dst.stream;
                 };
             }
+            class MockMediaRecorder extends EventTarget {
+                constructor(stream, options) {
+                    super();
+                    this.stream = stream;
+                    this.state = 'inactive';
+                    this.ondataavailable = null;
+                    this.onstop = null;
+                    this.mimeType = (options && options.mimeType) || 'audio/webm';
+                }
+                start() { this.state = 'recording'; }
+                stop() {
+                    this.state = 'inactive';
+                    const fakeData = new Uint8Array(2048).fill(128);
+                    const blob = new Blob([fakeData], { type: this.mimeType });
+                    const ev = new Event('dataavailable');
+                    ev.data = blob;
+                    if (this.ondataavailable) this.ondataavailable(ev);
+                    const self = this;
+                    setTimeout(() => {
+                        if (self.onstop) self.onstop(new Event('stop'));
+                        self.dispatchEvent(new Event('stop'));
+                    }, 30);
+                }
+                static isTypeSupported() { return true; }
+            }
+            window.MediaRecorder = MockMediaRecorder;
         """)
         interview_page.goto(f"http://localhost:5174/interview/{session_id}")
         interview_page.wait_for_load_state("networkidle")
