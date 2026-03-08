@@ -606,8 +606,25 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
         except Exception:
             print(" (timeout — still showing final state)")
 
-        # Pause on report page so it's visible in the recording
-        interview_page.wait_for_timeout(4000)
+        # Scroll through the report so per-question breakdown is visible
+        interview_page.wait_for_timeout(2000)  # let report render fully
+        # Scroll down slowly so the viewer can read each section
+        interview_page.evaluate("""
+            () => new Promise(resolve => {
+                const totalHeight = document.body.scrollHeight;
+                const step = 180;
+                let scrolled = 0;
+                const timer = setInterval(() => {
+                    window.scrollBy(0, step);
+                    scrolled += step;
+                    if (scrolled >= totalHeight) {
+                        clearInterval(timer);
+                        setTimeout(resolve, 2000); // pause at bottom
+                    }
+                }, 120); // scroll every 120ms → smooth, readable
+            })
+        """)
+        interview_page.wait_for_timeout(1500)
 
         # Grab video path before closing
         video_path = interview_page.video.path() if interview_page.video else None
