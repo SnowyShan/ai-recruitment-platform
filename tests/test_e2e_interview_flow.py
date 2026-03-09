@@ -541,6 +541,9 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
     use_blackhole = bh_check.returncode == 0
     if use_blackhole:
         print("  🎛  BlackHole 2ch detected — using digital loopback (say → BlackHole → browser mic)")
+        # Set BlackHole 2ch as system INPUT so browser getUserMedia captures it
+        subprocess.run(["SwitchAudioSource", "-s", "BlackHole 2ch", "-t", "input"],
+                       capture_output=True)
     else:
         print("  🎙  BlackHole not found — using speaker → built-in mic (acoustic)")
 
@@ -566,7 +569,10 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
             # mic permission dialog without replacing the audio device.
             # Real MediaRecorder records from whatever is set as system input
             # (BlackHole 2ch when installed, built-in mic otherwise).
-            args=["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"],
+            # --use-fake-ui-for-media-stream: auto-approves the browser-level mic permission
+            # dialog without replacing the audio device. Real MediaRecorder then captures
+            # from the system default input (BlackHole 2ch when set above).
+            args=["--use-fake-ui-for-media-stream"],
             viewport={"width": 1280, "height": 800},
         )
 
@@ -614,14 +620,13 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
         interview_page.wait_for_load_state("networkidle")
         interview_page.wait_for_timeout(800)
 
-        # Grant microphone → instructions screen → begin interview
+        # Grant microphone → getUserMedia resolves → instructions screen
         interview_page.click("button:has-text('Allow Microphone')", timeout=10_000)
-        interview_page.wait_for_timeout(1200)
-        # Click "Tap to Begin" (instructions screen) to start questions
-        begin_btn = interview_page.query_selector("button:has-text('Tap to Begin')")
-        if begin_btn:
-            begin_btn.click()
-        interview_page.wait_for_timeout(1500)
+        # Wait up to 8s for getUserMedia to resolve and Tap to Begin to appear
+        interview_page.wait_for_selector("button:has-text('Tap to Begin')", timeout=8_000)
+        interview_page.wait_for_timeout(500)
+        interview_page.click("button:has-text('Tap to Begin')")
+        interview_page.wait_for_timeout(2000)
         interview_page.wait_for_timeout(1000)
 
         # Answer each question: speak through speakers while browser records mic
@@ -672,27 +677,46 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
         except Exception:
             print(" (timeout)")
 
-        # Scroll through report so per-question breakdown is visible
+        # Expand all per-question sections so transcript/feedback is visible
         interview_page.wait_for_timeout(2000)
+        q_buttons = interview_page.query_selector_all("button:has-text('▼')")
+        if not q_buttons:
+            # Fallback: click all card buttons (question accordion headers)
+            q_buttons = interview_page.query_selector_all(".card button")
+        for btn in q_buttons:
+            try:
+                btn.scroll_into_view_if_needed()
+                btn.click()
+                interview_page.wait_for_timeout(400)
+            except Exception:
+                pass
+
+        # Scroll slowly through full report (summary + all expanded questions)
+        interview_page.wait_for_timeout(800)
         interview_page.evaluate("""
             () => new Promise(resolve => {
                 const totalHeight = document.body.scrollHeight;
-                const step = 180;
+                const step = 120;
                 let scrolled = 0;
                 const timer = setInterval(() => {
                     window.scrollBy(0, step);
                     scrolled += step;
                     if (scrolled >= totalHeight) {
                         clearInterval(timer);
-                        setTimeout(resolve, 2000);
+                        setTimeout(resolve, 3000);
                     }
-                }, 120);
+                }, 150);
             })
         """)
-        interview_page.wait_for_timeout(1500)
+        interview_page.wait_for_timeout(2000)
 
         video_path = interview_page.video.path() if interview_page.video else None
         context.close()
+
+    # Restore system audio input to built-in mic
+    if use_blackhole:
+        subprocess.run(["SwitchAudioSource", "-s", "MacBook Pro Microphone", "-t", "input"],
+                       capture_output=True)
 
     if video_path and os.path.exists(video_path):
         final_path = os.path.join(recordings_dir, f"{video_name}.webm")
