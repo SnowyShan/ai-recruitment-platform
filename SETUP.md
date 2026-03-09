@@ -56,10 +56,18 @@ cp ../interview-module/frontend/.env.example ../interview-module/frontend/.env
 
 ---
 
-## Step 4 — Node dependencies
+## Step 4 — Main frontend env
 
 ```bash
-cd ../frontend && npm install
+cp frontend/.env.example frontend/.env
+# VITE_API_URL is intentionally blank — Vite's dev proxy routes /api → localhost:8000
+# Only fill in VITE_INTERVIEW_API_URL and VITE_INTERVIEW_URL if different from defaults
+```
+
+## Step 5 — Node dependencies
+
+```bash
+cd frontend && npm install
 cd ../interview-module/frontend && npm install
 ```
 
