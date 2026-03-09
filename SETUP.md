@@ -5,131 +5,108 @@
 - Python 3.9+
 - Node.js 18+
 - Git
+- Two API keys: Anthropic (`console.anthropic.com`) and OpenAI (`platform.openai.com`)
 
-## 1. Clone the repo
+---
+
+## Step 1 — Clone
 
 ```bash
 git clone <repo-url>
 cd ai-recruitment-platform
 ```
 
-## 2. Backend (Main API — port 8000)
+---
+
+## Step 2 — Python environment
+
+One virtual environment is shared by both backends:
 
 ```bash
 cd backend
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+pip install -r ../interview-module/backend/requirements.txt
 ```
 
-Copy and fill in the env file:
+---
+
+## Step 3 — Environment files
 
 ```bash
+# Main backend — defaults work, no changes needed
 cp .env.example .env
+
+# Interview backend — fill in your API keys
+cp ../interview-module/backend/.env.example ../interview-module/backend/.env
 ```
 
-Edit `backend/.env` — the defaults are fine for local dev. No API keys needed here.
+Edit `interview-module/backend/.env` and fill in:
 
-Initialize the database:
-
-```bash
-python3 -c "from app.database import engine; from app.models import Base; Base.metadata.create_all(engine)"
+```
+ANTHROPIC_API_KEY=sk-ant-...    # from console.anthropic.com
+OPENAI_API_KEY=sk-proj-...      # from platform.openai.com
 ```
 
-Start the server:
-
 ```bash
-uvicorn app.main:app --reload --port 8000
+# Interview frontend — already points to localhost, no changes needed
+cp ../interview-module/frontend/.env.example ../interview-module/frontend/.env
 ```
 
 ---
 
-## 3. Interview Module Backend (port 8001)
+## Step 4 — Node dependencies
 
 ```bash
-cd interview-module/backend
-# Reuse the same venv or create a new one
-source ../../backend/venv/bin/activate
-pip install -r requirements.txt
-```
-
-Copy and fill in the env file:
-
-```bash
-cp .env.example .env
-```
-
-Edit `interview-module/backend/.env` and fill in your API keys:
-
-```
-ANTHROPIC_API_KEY=your-anthropic-key-here   # from console.anthropic.com
-OPENAI_API_KEY=your-openai-key-here         # from platform.openai.com
-DB_PATH=./interview.db
-TALENTBRIDGE_API_URL=http://localhost:8000
-```
-
-Start the server:
-
-```bash
-uvicorn main:app --reload --port 8001
+cd ../frontend && npm install
+cd ../interview-module/frontend && npm install
 ```
 
 ---
 
-## 4. Main Frontend (port 5173)
+## Step 5 — Start all 4 services
+
+Open 4 terminal tabs and run one command in each:
 
 ```bash
-cd frontend
-npm install
-npm run dev
+# Tab 1 — Main backend (port 8000)
+cd backend && source venv/bin/activate && uvicorn app.main:app --reload --port 8000
+
+# Tab 2 — Interview backend (port 8001)
+cd interview-module/backend && source ../../backend/venv/bin/activate && uvicorn app.main:app --reload --port 8001
+
+# Tab 3 — Main frontend (port 5173)
+cd frontend && npm run dev
+
+# Tab 4 — Interview frontend (port 5174)
+cd interview-module/frontend && npm run dev
 ```
 
-No env file needed — defaults to `http://localhost:8000`.
+Databases are created automatically on first startup — no manual migration needed.
 
 ---
 
-## 5. Interview Module Frontend (port 5174)
-
-```bash
-cd interview-module/frontend
-npm install
-cp .env.example .env   # already points to localhost:8001 and localhost:8000
-npm run build
-npx serve dist -p 5174
-```
-
----
-
-## 6. Verify everything is running
-
-Open your browser and check:
+## Step 6 — Open the app
 
 - Main app: http://localhost:5173
-- Interview module: http://localhost:5174
-
-All four services must be running at the same time for the full flow to work.
-
----
-
-## 7. Create your first recruiter account
-
-Go to http://localhost:5173 and sign up. There is no pre-seeded admin account — just register directly.
+- Click **Sign Up** and create a recruiter account
+- You're in
 
 ---
 
-## Running the E2E test
+## Step 7 — Run the E2E test (optional)
 
-The E2E test validates the full interview flow (auth → job setup → question generation → interview → scoring).
+Verifies the full interview flow works end-to-end:
 
 ```bash
 cd backend
 source venv/bin/activate
-pip install playwright
-playwright install chromium
+pip install playwright && playwright install chromium
 python3 ../tests/test_e2e_interview_flow.py
 ```
 
-Add `--record` to open a real browser window and record a video of the session:
+Add `--record` to open a real browser window and save a video of the session:
 
 ```bash
 python3 ../tests/test_e2e_interview_flow.py --record
@@ -137,16 +114,4 @@ python3 ../tests/test_e2e_interview_flow.py --record
 
 Recordings are saved to `tests/recordings/`.
 
-> **Note:** The `--record` flag uses BlackHole 2ch for clean audio loopback if installed.
-> Install it from https://existential.audio/blackhole/ for best results.
-
----
-
-## API Keys
-
-| Key | Where to get it |
-|-----|----------------|
-| `ANTHROPIC_API_KEY` | https://console.anthropic.com |
-| `OPENAI_API_KEY` | https://platform.openai.com/api-keys |
-
-Both are required. The interview module uses Anthropic for question generation and scoring, and OpenAI Whisper for speech-to-text transcription and TTS for question audio.
+> **Tip:** Install [BlackHole 2ch](https://existential.audio/blackhole/) for clean audio loopback during the recorded test. Without it the test still passes but uses your Mac's speakers/mic.
