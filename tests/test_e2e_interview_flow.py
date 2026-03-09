@@ -566,7 +566,7 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
             # mic permission dialog without replacing the audio device.
             # Real MediaRecorder records from whatever is set as system input
             # (BlackHole 2ch when installed, built-in mic otherwise).
-            args=["--use-fake-ui-for-media-stream"],
+            args=["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"],
             viewport={"width": 1280, "height": 800},
         )
 
@@ -580,8 +580,13 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
         page.fill('input[type="email"]', TEST_EMAIL)
         page.fill('input[type="password"]', TEST_PASSWORD)
         page.click('button[type="submit"]')
-        page.wait_for_url("**/dashboard", timeout=15_000)
-        page.wait_for_timeout(600)
+        # React Router SPA navigation — wait for URL change via polling instead of load event
+        import time as _time
+        for _ in range(30):
+            if "/dashboard" in page.url or "/jobs" in page.url:
+                break
+            _time.sleep(0.5)
+        page.wait_for_timeout(800)
 
         # Job Detail — show the job page briefly
         page.goto(f"{TB_URL}/jobs/{job_id}")
@@ -609,11 +614,14 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
         interview_page.wait_for_load_state("networkidle")
         interview_page.wait_for_timeout(800)
 
-        # Grant microphone and begin
+        # Grant microphone → instructions screen → begin interview
         interview_page.click("button:has-text('Allow Microphone')", timeout=10_000)
-        interview_page.wait_for_selector("button:has-text('Tap to Begin')", timeout=15_000)
-        interview_page.wait_for_timeout(600)
-        interview_page.click("button:has-text('Tap to Begin')")
+        interview_page.wait_for_timeout(1200)
+        # Click "Tap to Begin" (instructions screen) to start questions
+        begin_btn = interview_page.query_selector("button:has-text('Tap to Begin')")
+        if begin_btn:
+            begin_btn.click()
+        interview_page.wait_for_timeout(1500)
         interview_page.wait_for_timeout(1000)
 
         # Answer each question: speak through speakers while browser records mic
@@ -631,12 +639,27 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
             speak(SPOKEN_ANSWER)
             print(" done speaking", end="", flush=True)
 
-            # Small gap after speaking, then click Next/Finish
-            interview_page.wait_for_timeout(500)
+            # Wait for Next/Finish button to be enabled (not disabled during isSpeaking)
+            interview_page.wait_for_timeout(1500)
+            # Wait up to 15s for button to become clickable
+            for _attempt in range(30):
+                finish_btn = interview_page.query_selector("button:has-text('Finish'):not([disabled])")
+                next_btn = interview_page.query_selector("button:has-text('Next'):not([disabled])")
+                if finish_btn or next_btn:
+                    break
+                interview_page.wait_for_timeout(500)
 
-            is_last = interview_page.query_selector("button:has-text('Finish')") is not None
+            # Debug: screenshot to see current state
+            interview_page.screenshot(path=f"/tmp/tb_debug_q{i+1}.png")
+            # Log all visible buttons
+            btns = interview_page.query_selector_all("button")
+            btn_texts = [b.text_content() for b in btns]
+            print(f" [buttons: {btn_texts}]", end="", flush=True)
+
+            is_last = interview_page.query_selector("button:has-text('Finish'):not([disabled])") is not None
             btn_text = "Finish" if is_last else "Next →"
-            interview_page.click(f"button:has-text('{btn_text}')")
+            btn_selector = "button:has-text('Finish')" if is_last else "button:has-text('Next')"
+            interview_page.click(btn_selector, timeout=10_000)
             print(f" → {btn_text}")
 
             # Wait for Whisper processing to complete
