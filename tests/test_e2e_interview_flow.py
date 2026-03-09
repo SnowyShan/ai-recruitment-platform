@@ -639,22 +639,13 @@ def record_ui_flow(job_id: int, token: str, num_questions: int = 4):
             speak(SPOKEN_ANSWER)
             print(" done speaking", end="", flush=True)
 
-            # Wait for Next/Finish button to be enabled (not disabled during isSpeaking)
-            interview_page.wait_for_timeout(1500)
-            # Wait up to 15s for button to become clickable
+            # Wait up to 15s for Next/Finish to become clickable (not disabled during isSpeaking)
+            interview_page.wait_for_timeout(1000)
             for _attempt in range(30):
-                finish_btn = interview_page.query_selector("button:has-text('Finish'):not([disabled])")
-                next_btn = interview_page.query_selector("button:has-text('Next'):not([disabled])")
-                if finish_btn or next_btn:
+                if (interview_page.query_selector("button:has-text('Finish'):not([disabled])") or
+                        interview_page.query_selector("button:has-text('Next'):not([disabled])")):
                     break
                 interview_page.wait_for_timeout(500)
-
-            # Debug: screenshot to see current state
-            interview_page.screenshot(path=f"/tmp/tb_debug_q{i+1}.png")
-            # Log all visible buttons
-            btns = interview_page.query_selector_all("button")
-            btn_texts = [b.text_content() for b in btns]
-            print(f" [buttons: {btn_texts}]", end="", flush=True)
 
             is_last = interview_page.query_selector("button:has-text('Finish'):not([disabled])") is not None
             btn_text = "Finish" if is_last else "Next →"
