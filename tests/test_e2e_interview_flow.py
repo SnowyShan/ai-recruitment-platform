@@ -442,7 +442,7 @@ def run_test(record: bool = False):
     return all_passed
 
 
-def _blackhole_device_id() -> str | None:
+def _blackhole_device_id():
     """Return the CoreAudio UID of BlackHole 2ch if installed, else None."""
     try:
         import plistlib
