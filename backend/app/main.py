@@ -46,7 +46,8 @@ app = FastAPI(
     title="TalentBridge AI",
     description="AI-Powered Recruitment Platform - Intelligent candidate screening and matching",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    redirect_slashes=False,  # Prevent 307 redirects that strip Authorization headers
 )
 
 # CORS Configuration

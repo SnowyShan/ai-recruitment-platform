@@ -12,6 +12,11 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [sessionExpired] = useState(() => {
+    const expired = sessionStorage.getItem('session_expired') === '1';
+    if (expired) sessionStorage.removeItem('session_expired');
+    return expired;
+  });
 
   const from = location.state?.from?.pathname || '/dashboard';
 
@@ -96,6 +101,12 @@ const Login = () => {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
+            {sessionExpired && (
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm">
+                Your session has expired. Please sign in again.
+              </div>
+            )}
+
             {error && (
               <div className="p-4 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm animate-in">
                 {error}

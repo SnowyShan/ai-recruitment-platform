@@ -32,9 +32,12 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     // Only force-logout on explicit 401 from server (not network errors / CORS)
-    if (error.response?.status === 401) {
+    // Skip /api/auth/me — AuthContext handles that 401 itself (expired token on app load)
+    const url = error.config?.url || '';
+    if (error.response?.status === 401 && !url.includes('/api/auth/me')) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
+      sessionStorage.setItem('session_expired', '1');
       window.location.href = '/login';
     }
     return Promise.reject(error);
