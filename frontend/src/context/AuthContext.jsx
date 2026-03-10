@@ -23,6 +23,7 @@ export const AuthProvider = ({ children }) => {
       console.error('Failed to load user:', err);
       localStorage.removeItem('token');
       localStorage.removeItem('user');
+      setUser(null);
     } finally {
       setLoading(false);
     }
