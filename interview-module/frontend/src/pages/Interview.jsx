@@ -58,6 +58,7 @@ export default function Interview() {
   // Drawing (Excalidraw) state
   const drawElementsRef = useRef({})   // questionIndex → elements array
   const drawFilesRef = useRef({})      // questionIndex → files object
+  const drawAppStateRef = useRef({})   // questionIndex → appState snapshot
   const excalidrawAPIRef = useRef(null)
 
   const [searchParams] = useSearchParams()
@@ -517,6 +518,7 @@ export default function Interview() {
         if (nonDeleted && nonDeleted.length > 0) {
           const blob = await exportToBlob({
             elements: nonDeleted,
+            appState: drawAppStateRef.current[i] || {},
             files: drawFilesRef.current[i] || null,
             mimeType: 'image/png',
           })
@@ -789,6 +791,7 @@ export default function Interview() {
                 }}
                 onChange={(elements, appState, files) => {
                   drawElementsRef.current[currentIndex] = [...elements]
+                  drawAppStateRef.current[currentIndex] = appState
                   if (files && Object.keys(files).length > 0) {
                     drawFilesRef.current[currentIndex] = { ...files }
                   }
