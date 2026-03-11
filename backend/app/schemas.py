@@ -98,6 +98,7 @@ class JobBase(BaseModel):
 
 class JobCreate(JobBase):
     interview_behavioral_pct: Optional[int] = 20
+    verify_coding_ability: Optional[bool] = False
     selected_question_ids: Optional[list] = []  # pre-selected from question bank
 
 
@@ -121,6 +122,7 @@ class JobUpdate(BaseModel):
     interview_difficulty: Optional[int] = None
     interview_seniority: Optional[str] = None
     interview_behavioral_pct: Optional[int] = None
+    verify_coding_ability: Optional[bool] = None
     selected_question_ids: Optional[list] = None  # passed when triggering re-setup
 
 
@@ -136,6 +138,7 @@ class JobResponse(JobBase):
     interview_difficulty: Optional[int] = 3
     interview_seniority: Optional[str] = "mid"
     interview_behavioral_pct: Optional[int] = 20
+    verify_coding_ability: Optional[bool] = False
     domain: Optional[str] = None
     setup_status: Optional[str] = None
 

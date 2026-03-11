@@ -25,6 +25,7 @@ def _create_interview_session(
     num_questions: int = 8,
     job_id: Optional[int] = None,
     behavioral_pct: int = 20,
+    verify_coding_ability: bool = False,
 ) -> Optional[str]:
     """Call interview module to create a session. Returns session_id or None."""
     try:
@@ -36,6 +37,7 @@ def _create_interview_session(
             "time_limit": time_limit,
             "num_questions": num_questions,
             "behavioral_pct": behavioral_pct,
+            "verify_coding_ability": verify_coding_ability,
         }
         if job_id:
             payload["job_id"] = job_id
@@ -131,6 +133,7 @@ async def create_screening(
         num_questions=job.interview_num_questions or 8,
         job_id=job.id,
         behavioral_pct=job.interview_behavioral_pct or 20,
+        verify_coding_ability=bool(job.verify_coding_ability),
     )
 
     # Generate invite token

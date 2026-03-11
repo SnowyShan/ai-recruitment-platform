@@ -163,6 +163,18 @@ export default function Report() {
                           <span>✗</span>{pq.what_was_missing}
                         </p>
                       )}
+                      {pq.code_submission && (
+                        <div className="mt-3">
+                          <p className="text-xs font-semibold text-slate-500 mb-1">Submitted Code</p>
+                          <pre className="bg-slate-900 text-slate-100 text-xs p-3 rounded-lg overflow-x-auto"><code>{pq.code_submission}</code></pre>
+                        </div>
+                      )}
+                      {pq.code_analysis && (
+                        <div className="mt-2">
+                          <p className="text-xs font-semibold text-slate-500 mb-1">Code Analysis</p>
+                          <p className="text-slate-600 text-sm">{pq.code_analysis}</p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

@@ -198,6 +198,49 @@ Write a comprehensive hiring report. Return ONLY JSON:
     start, end = text.find("{"), text.rfind("}") + 1
     return json.loads(text[start:end])
 
+def generate_coding_question(job_description: str) -> dict:
+    """Generate a single logic-based coding question. Language-agnostic, solvable in pseudocode."""
+    client = _client()
+    if not client:
+        return _mock_coding_question()
+
+    prompt = f"""You are a technical interviewer. Generate exactly 1 coding question that tests logic and problem-solving ability.
+
+Job context (for reference only — the question should NOT require any specific API or framework):
+{job_description[:500]}
+
+Rules:
+1. The question must be solvable in pseudocode or ANY programming language.
+2. Do NOT require any specific language, library, API, or framework.
+3. Focus on logic, problem decomposition, and algorithmic thinking.
+4. The problem should be clear, well-defined, and completable in 10-15 minutes.
+5. Include a concrete example with input/output to clarify expectations.
+6. Also write a voice_text version: natural, conversational, suitable for text-to-speech.
+
+Return ONLY a single JSON object:
+{{"question": "...", "voice_text": "...", "topic": "Coding", "type": "coding"}}"""
+
+    resp = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=800,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    text = resp.content[0].text.strip()
+    start, end = text.find("{"), text.rfind("}") + 1
+    q = json.loads(text[start:end])
+    q["type"] = "coding"
+    return q
+
+
+def _mock_coding_question() -> dict:
+    return {
+        "question": "Given a list of numbers, write a function that returns the two numbers that sum closest to a target value. Walk through your approach and explain your reasoning.\n\nExample: nums = [1, 4, 7, 10], target = 12 → Output: [4, 7] (sum = 11, closest to 12)",
+        "voice_text": "Here's a coding question for you. Given a list of numbers, write a function that returns the two numbers that sum closest to a target value. For example, given the list 1, 4, 7, 10 and a target of 12, the answer would be 4 and 7 since their sum of 11 is closest to 12. Please walk through your approach and explain your reasoning as you go.",
+        "topic": "Coding",
+        "type": "coding",
+    }
+
+
 # ── Mock responses when no API key ─────────────────────────────
 
 def _mock_questions(n: int) -> list:
@@ -220,14 +263,36 @@ def _mock_report() -> dict:
     return {"overall_score": 72, "pass": True, "summary": "Mock report — add API key for real analysis.", "strengths": ["Communicates clearly"], "weaknesses": ["Needs more depth"], "hiring_recommendation": "Consider for next round.", "per_question": []}
 
 
-def generate_report_from_transcript(job_description: str, resume_text: str, questions: list, full_transcript: str, evaluation_prompt: str = "") -> dict:
+def generate_report_from_transcript(job_description: str, resume_text: str, questions: list, full_transcript: str, evaluation_prompt: str = "", code_answers: dict = None) -> dict:
     client = _client()
     if not client:
         return _mock_report()
 
-    questions_list = "\n".join([f"Q{i+1}: {q['question']}" for i, q in enumerate(questions)])
+    code_answers = code_answers or {}
+
+    questions_list = ""
+    for i, q in enumerate(questions):
+        questions_list += f"Q{i+1}: {q['question']}"
+        if q.get("type") == "coding":
+            questions_list += "  [CODING QUESTION]"
+        questions_list += "\n"
+
+    # Build code submissions section if any
+    code_section = ""
+    if code_answers:
+        code_section = "\n\nCode Submissions (from the code editor):\n"
+        for idx_str, code in code_answers.items():
+            code_section += f"--- Q{int(idx_str)+1} Code Answer ---\n{code}\n---\n\n"
 
     guidelines = evaluation_prompt.strip() if evaluation_prompt.strip() else "Evaluate answers fairly based on technical correctness and depth. For skipped questions, score 0."
+
+    code_eval_guidelines = ""
+    if code_answers:
+        code_eval_guidelines = """
+For coding questions with submitted code:
+- Analyze the code focusing on: logical correctness, problem decomposition, edge case awareness, and clarity of thinking.
+- Do NOT penalize for syntax errors or language-specific style issues.
+- Include a "code_analysis" field in the per_question entry with your analysis of the submitted code."""
 
     prompt = f"""You are a senior technical interviewer writing a hiring evaluation report.
 
@@ -241,10 +306,10 @@ Interview Questions:
 {questions_list}
 
 Full Interview Transcript (questions marked with [Q1:], [Q2:] etc, [SKIPPED] means candidate skipped):
-{full_transcript}
+{full_transcript}{code_section}
 
 Evaluation guidelines:
-{guidelines}
+{guidelines}{code_eval_guidelines}
 
 Return ONLY valid JSON in this exact format:
 {{
@@ -260,10 +325,12 @@ Return ONLY valid JSON in this exact format:
       "score": <0-100>,
       "feedback": "...",
       "what_was_good": "...",
-      "what_was_missing": "..."
+      "what_was_missing": "...",
+      "code_analysis": "..."
     }}
   ]
-}}"""
+}}
+Note: "code_analysis" should only be present for coding questions that have a code submission. Omit it for other questions."""
 
     resp = client.messages.create(
         model="claude-sonnet-4-5-20250929",

@@ -32,6 +32,12 @@ def init_db():
         )
     """)
 
+    # Add verify_coding_ability column to sessions (safe migration for existing DBs)
+    try:
+        conn.execute("ALTER TABLE sessions ADD COLUMN verify_coding_ability INTEGER DEFAULT 0")
+    except Exception:
+        pass  # Column already exists
+
     # Settings
     conn.execute("""
         CREATE TABLE IF NOT EXISTS settings (

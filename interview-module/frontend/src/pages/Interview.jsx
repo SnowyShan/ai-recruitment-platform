@@ -45,6 +45,12 @@ export default function Interview() {
   const [isWrapUp, setIsWrapUp] = useState(false)
   const isWrapUpRef = useRef(false)
 
+  // Code editor state
+  const [verifyCoding, setVerifyCoding] = useState(state?.verify_coding_ability || false)
+  const [codeAnswers, setCodeAnswers] = useState({})  // questionIndex → code string
+  const codeAnswersRef = useRef({})
+  const [activeTab, setActiveTab] = useState({})       // questionIndex → 'voice' | 'code'
+
   const [searchParams] = useSearchParams()
   const [tokenError, setTokenError] = useState(null)
   const [tokenChecked, setTokenChecked] = useState(false)
@@ -81,12 +87,14 @@ export default function Interview() {
   useEffect(() => { currentIndexRef.current = currentIndex }, [currentIndex])
   useEffect(() => { questionsRef.current = questions }, [questions])
   useEffect(() => { isWrapUpRef.current = isWrapUp }, [isWrapUp])
+  useEffect(() => { codeAnswersRef.current = codeAnswers }, [codeAnswers])
 
   useEffect(() => {
     if (!state?.questions) {
       axios.get(`${API}/api/interview/session/${sessionId}`).then(({ data }) => {
         setQuestions(data.questions)
         setTimeLeft(data.time_limit * 60)
+        if (data.verify_coding_ability) setVerifyCoding(true)
       })
     }
   }, [sessionId])
@@ -492,6 +500,7 @@ export default function Interview() {
       await axios.post(`${API}/api/interview/session/${sessionId}/complete`, {
         full_transcript: fullTranscript,
         questions: qs,
+        code_answers: Object.keys(codeAnswersRef.current).length > 0 ? codeAnswersRef.current : undefined,
       })
     } catch (e) { console.error(e) }
     if (tokenRef.current) {
@@ -676,6 +685,44 @@ export default function Interview() {
         <p className="text-base sm:text-lg font-medium text-slate-800 leading-relaxed">{q.question}</p>
         {isSpeaking && (
           <p className="text-xs text-slate-400 mt-3 italic">Recording starts automatically when the question finishes…</p>
+        )}
+
+        {/* Tab bar — only for coding questions when coding is enabled */}
+        {verifyCoding && q.type === 'coding' && (
+          <>
+            <div className="flex gap-1 mt-4 border-b border-slate-200">
+              <button
+                onClick={() => setActiveTab(t => ({ ...t, [currentIndex]: 'voice' }))}
+                className={`px-4 py-2 text-sm font-medium transition-colors ${
+                  (activeTab[currentIndex] || 'voice') === 'voice'
+                    ? 'text-indigo-600 border-b-2 border-indigo-600'
+                    : 'text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                🎤 Voice
+              </button>
+              <button
+                onClick={() => setActiveTab(t => ({ ...t, [currentIndex]: 'code' }))}
+                className={`px-4 py-2 text-sm font-medium transition-colors ${
+                  activeTab[currentIndex] === 'code'
+                    ? 'text-indigo-600 border-b-2 border-indigo-600'
+                    : 'text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                💻 Code
+              </button>
+            </div>
+
+            {activeTab[currentIndex] === 'code' && (
+              <textarea
+                value={codeAnswers[currentIndex] || ''}
+                onChange={e => setCodeAnswers(prev => ({ ...prev, [currentIndex]: e.target.value }))}
+                placeholder="Write your code or solution here..."
+                className="w-full min-h-[300px] mt-3 p-4 rounded-lg border border-slate-200 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-y"
+                style={{ fontFamily: 'monospace' }}
+              />
+            )}
+          </>
         )}
       </div>
 

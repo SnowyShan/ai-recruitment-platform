@@ -295,6 +295,7 @@ class SessionCreate(BaseModel):
     # New fields for question-bank-aware session creation
     job_id: Optional[int] = None
     behavioral_pct: int = 20  # % of questions that are behavioral/resume-based
+    verify_coding_ability: bool = False
 
 
 @session_router.post("/session")
@@ -350,16 +351,28 @@ def create_session(req: SessionCreate):
     random.shuffle(technical_qs)
     questions = technical_qs + behavioral_qs
 
+    # Generate coding question if requested
+    if req.verify_coding_ability:
+        coding_q = ai.generate_coding_question(req.job_description)
+        # Generate TTS for coding question
+        coding_audio_filename = f"{session_id}_coding.mp3"
+        coding_audio_path = os.path.join(AUDIO_DIR, coding_audio_filename)
+        tts_ok = ai.generate_and_store_tts(coding_q.get("voice_text") or coding_q["question"], coding_audio_path)
+        coding_q["audio_url"] = f"/audio/{coding_audio_filename}" if tts_ok else None
+        questions.append(coding_q)
+
     conn = get_conn()
     conn.execute(
         "INSERT INTO sessions (id, job_description, resume_text, difficulty, seniority_bar, "
-        "time_limit, questions, answers, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "time_limit, questions, answers, status, verify_coding_ability, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (session_id, req.job_description, req.resume_text, req.difficulty, req.seniority_bar,
-         req.time_limit, json.dumps(questions), "{}", "active", datetime.utcnow().isoformat())
+         req.time_limit, json.dumps(questions), "{}", "active", 1 if req.verify_coding_ability else 0,
+         datetime.utcnow().isoformat())
     )
     conn.commit()
     conn.close()
-    return {"session_id": session_id, "questions": questions, "time_limit": req.time_limit}
+    return {"session_id": session_id, "questions": questions, "time_limit": req.time_limit,
+            "verify_coding_ability": req.verify_coding_ability}
 
 
 @session_router.get("/session/{session_id}")
@@ -377,6 +390,7 @@ def get_session(session_id: str):
         "time_limit": row["time_limit"],
         "seniority_bar": row["seniority_bar"],
         "report": json.loads(row["report"]) if row["report"] else None,
+        "verify_coding_ability": bool(row["verify_coding_ability"]) if "verify_coding_ability" in row.keys() else False,
     }
 
 
@@ -404,6 +418,7 @@ def submit_answer(session_id: str, req: AnswerSubmit):
 class CompleteRequest(BaseModel):
     full_transcript: Optional[str] = None
     questions: Optional[list] = None
+    code_answers: Optional[dict] = None  # {questionIndex: codeString}
 
 @session_router.post("/session/{session_id}/complete")
 def complete_session(session_id: str, req: CompleteRequest = CompleteRequest()):
@@ -415,8 +430,10 @@ def complete_session(session_id: str, req: CompleteRequest = CompleteRequest()):
     full_transcript = req.full_transcript or ""
     settings_row = conn.execute("SELECT value FROM settings WHERE key = 'evaluation_prompt'").fetchone()
     evaluation_prompt = settings_row["value"] if settings_row else ""
+    code_answers = req.code_answers or {}
     report = ai.generate_report_from_transcript(
-        row["job_description"], row["resume_text"], questions, full_transcript, evaluation_prompt
+        row["job_description"], row["resume_text"], questions, full_transcript, evaluation_prompt,
+        code_answers=code_answers,
     )
 
     # Enrich per_question with answer_char_count extracted from full_transcript.
@@ -436,6 +453,10 @@ def complete_session(session_id: str, req: CompleteRequest = CompleteRequest()):
         # Strip [SKIPPED] markers before counting
         clean = answer_text.replace("[SKIPPED]", "").strip()
         pq["answer_char_count"] = len(clean)
+        # Attach code submission to per_question entry if present
+        code_key = str(i - 1)  # code_answers is 0-indexed
+        if code_key in code_answers and code_answers[code_key].strip():
+            pq["code_submission"] = code_answers[code_key]
 
     conn.execute(
         "UPDATE sessions SET status='completed', report=?, completed_at=? WHERE id=?",

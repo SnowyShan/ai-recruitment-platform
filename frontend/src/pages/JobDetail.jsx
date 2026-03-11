@@ -742,6 +742,7 @@ export default function JobDetail() {
       difficulty: job.interview_difficulty ?? 3,
       seniority: job.interview_seniority ?? 'mid',
       behavioral_pct: job.interview_behavioral_pct ?? 20,
+      verify_coding_ability: job.verify_coding_ability ?? false,
     });
   }
 
@@ -769,6 +770,7 @@ Experience: 5 years of relevant industry experience.`;
           num_questions: screeningConfig.num_questions,
           job_id: job.id,
           behavioral_pct: screeningConfig.behavioral_pct ?? 20,
+          verify_coding_ability: screeningConfig.verify_coding_ability ?? false,
         }),
       });
       const { session_id } = await res.json();
@@ -791,6 +793,7 @@ Experience: 5 years of relevant industry experience.`;
         interview_difficulty: screeningConfig.difficulty,
         interview_seniority: screeningConfig.seniority,
         interview_behavioral_pct: screeningConfig.behavioral_pct,
+        verify_coding_ability: screeningConfig.verify_coding_ability ?? false,
       });
       setConfigSaved(true);
       setTimeout(() => setConfigSaved(false), 2000);
@@ -1028,6 +1031,22 @@ Experience: 5 years of relevant industry experience.`;
                   >{l}</button>
                 ))}
               </div>
+            </div>
+
+            {/* Verify coding ability */}
+            <div className="sm:col-span-2">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={screeningConfig.verify_coding_ability ?? false}
+                  onChange={e => setScreeningConfig(c => ({ ...c, verify_coding_ability: e.target.checked }))}
+                  className="mt-0.5 accent-indigo-600"
+                />
+                <div>
+                  <span className="text-sm font-medium text-slate-700">Verify coding ability</span>
+                  <p className="text-xs text-slate-500 mt-0.5">Adds a logic-based coding question to the interview. Candidate can type their solution.</p>
+                </div>
+              </label>
             </div>
 
             {/* Save + Mock Interview buttons */}
