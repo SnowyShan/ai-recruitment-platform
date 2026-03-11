@@ -244,7 +244,7 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
 
   // Load question bank on modal open (domain=general to show all available questions)
   useEffect(() => {
-    loadBankQuestions('general');
+    loadBankQuestions('all');
   }, []);
 
   const handleChange = (e) => {

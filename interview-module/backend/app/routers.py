@@ -51,9 +51,24 @@ def search_question_bank(
     difficulty: Optional[int] = None,
     limit: int = Query(30, le=100),
 ):
-    """Search the shared question bank by domain and difficulty."""
+    """Search the shared question bank by domain and difficulty.
+    Pass domain='all' (or omit a specific domain) to return questions
+    across all domains — used by the create-job modal on open.
+    """
     conn = get_conn()
-    if difficulty:
+    all_domains = (domain.lower() == "all")
+    if all_domains:
+        if difficulty:
+            rows = conn.execute(
+                "SELECT * FROM questions WHERE difficulty=? ORDER BY created_at DESC LIMIT ?",
+                (difficulty, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM questions ORDER BY created_at DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
+    elif difficulty:
         rows = conn.execute(
             "SELECT * FROM questions WHERE domain=? AND difficulty=? ORDER BY created_at DESC LIMIT ?",
             (domain, difficulty, limit)
