@@ -615,14 +615,18 @@ def test_candidate_application_flow(job_id: int, recruiter_token: str,
             page.goto(interview_link)
             page.wait_for_load_state("networkidle")
 
-            # Wait up to 8s for "Before you begin" to render
-            # (token validation makes a round-trip to the TB backend)
+            # Wait for the actual visible h1 heading — not page.content() which
+            # includes JS bundle text and would always match trivially.
             before_you_begin = False
-            for _ in range(80):
-                if "before you begin" in page.content().lower():
-                    before_you_begin = True
-                    break
-                time.sleep(0.1)
+            try:
+                page.wait_for_selector(
+                    "h1:has-text('Before you begin')",
+                    state="visible",
+                    timeout=12_000,
+                )
+                before_you_begin = True
+            except Exception:
+                pass
 
             passed.append(_check(
                 "Interview module shows 'Before you begin' page",
@@ -631,8 +635,7 @@ def test_candidate_application_flow(job_id: int, recruiter_token: str,
             ))
 
             if before_you_begin and video_path:
-                # Hold on the "Before you begin" screen for 3s so it's
-                # clearly visible in the video recording before we close.
+                # Hold on the visible page for 3s so it's clear in the recording.
                 page.wait_for_timeout(3000)
         else:
             passed.append(_check("Interview link navigation skipped (no token)", False))
