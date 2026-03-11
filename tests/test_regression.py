@@ -661,6 +661,180 @@ def test_candidate_application_flow(job_id: int, recruiter_token: str,
     return passed
 
 
+# ── Test 7: In-progress re-entry + full interview launch ─────────────────────
+
+def test_interview_launch(job_id: int, recruiter_token: str):
+    """
+    TEST 7 — Covers the regression where status='in_progress' permanently
+    locked candidates out of their own interview.
+
+    Specifically:
+      REGRESSION CHECK:
+        Open interview link (first load) → start-from-token sets in_progress
+        Reload the page (same link) → must still show 'Before you begin',
+        NOT 'Interview Unavailable' (the pre-fix failure mode)
+
+      FULL FLOW:
+        Mock getUserMedia (no real mic in headless)
+        Click 'Allow Microphone & Continue'
+        Click 'Tap to Begin'
+        Assert first question text is visible
+
+    Setup is via API (candidate apply → auto-invite screening) so this test
+    focuses purely on the interview launch flow, not the apply flow (test 6).
+    """
+    print("\n[Test 7] Interview launch — in_progress re-entry + first question")
+    passed = []
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  ⚠️  playwright not installed — skipping")
+        return passed
+
+    # ── API setup: get a fresh screening with a valid session ──────────────
+    headers = {"Authorization": f"Bearer {recruiter_token}"}
+
+    # Enable auto-invite
+    requests.put(f"{TB_API}/api/settings/",
+                 json={"auto_invite_screening": True, "auto_invite_threshold": 70},
+                 headers=headers)
+
+    # Publish job
+    requests.post(f"{TB_API}/api/jobs/{job_id}/publish", headers=headers)
+
+    # Apply via API with a high-match resume PDF
+    resume_pdf = _make_resume_pdf()
+    candidate_email = f"t7-candidate-{_RUN_ID}@test.internal"
+    r = requests.post(
+        f"{TB_API}/api/public/apply",
+        data={"job_id": job_id, "full_name": f"T7 Candidate {_RUN_ID[:6]}",
+              "email": candidate_email},
+        files={"resume": ("resume.pdf", resume_pdf, "application/pdf")},
+    )
+    if r.status_code != 201:
+        passed.append(_check("API: application submitted for test setup", False,
+                              f"{r.status_code} {r.text[:100]}"))
+        return passed
+    passed.append(_check("API: application submitted", True))
+
+    # Retrieve screening
+    import time as _time
+    _time.sleep(2)
+    apps = requests.get(f"{TB_API}/api/public/status",
+                        params={"email": candidate_email}).json()
+    app_id = apps[0]["id"] if apps else None
+    screening = None
+    if app_id:
+        sc = requests.get(f"{TB_API}/api/screenings/",
+                          params={"application_id": app_id},
+                          headers=headers).json()
+        if sc:
+            screening = sc[0]
+
+    if not screening or not screening.get("interview_session_id"):
+        passed.append(_check("API: screening with session_id retrieved", False,
+                              str(screening)))
+        return passed
+    passed.append(_check("API: screening with session_id retrieved", True))
+
+    session_id   = screening["interview_session_id"]
+    invite_token = screening["invite_token"]
+    interview_url = f"{INTERVIEW_URL}/interview/{session_id}?token={invite_token}"
+
+    # ── Browser ───────────────────────────────────────────────────────────
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        ctx  = browser.new_context(
+            viewport={"width": 390, "height": 844},  # iPhone 14 viewport
+            user_agent=(
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 "
+                "Mobile/15E148 Safari/604.1"
+            ),
+        )
+
+        # Mock getUserMedia — no real mic in headless Chromium
+        ctx.add_init_script("""
+            navigator.mediaDevices.getUserMedia = async () => {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const dst = ctx.createMediaStreamDestination();
+                return dst.stream;
+            };
+        """)
+
+        page = ctx.new_page()
+
+        # ── Load 1: first visit (triggers start-from-token → in_progress) ─
+        print("  [7.1] First page load (sets status=in_progress)…")
+        page.goto(interview_url)
+        try:
+            page.wait_for_selector("h1:has-text('Before you begin')",
+                                   state="visible", timeout=12_000)
+            passed.append(_check("First load: 'Before you begin' shown", True))
+        except Exception as e:
+            passed.append(_check("First load: 'Before you begin' shown", False, str(e)))
+            ctx.close(); browser.close()
+            return passed
+
+        # ── Load 2: reload (status is now in_progress — regression check) ─
+        print("  [7.2] Reload with status=in_progress (regression check)…")
+        page.reload()
+        try:
+            page.wait_for_selector("h1:has-text('Before you begin')",
+                                   state="visible", timeout=12_000)
+            passed.append(_check(
+                "Re-entry with status=in_progress: 'Before you begin' still shown "
+                "(not 'Interview Unavailable')", True))
+        except Exception as e:
+            # Check if the failure mode happened
+            content = page.content()
+            if "Interview Unavailable" in content or "already in progress" in content:
+                passed.append(_check(
+                    "Re-entry with status=in_progress: 'Before you begin' still shown",
+                    False, "REGRESSION: showed 'Interview Unavailable'"))
+            else:
+                passed.append(_check(
+                    "Re-entry with status=in_progress: 'Before you begin' still shown",
+                    False, str(e)))
+            ctx.close(); browser.close()
+            return passed
+
+        # ── Click: Allow Microphone & Continue ────────────────────────────
+        print("  [7.3] Clicking 'Allow Microphone & Continue'…")
+        try:
+            page.click("button:has-text('Allow Microphone')", timeout=5_000)
+            # Wait for the phase to advance to 'ready' (Tap to Begin button)
+            page.wait_for_selector("button:has-text('Tap to Begin')",
+                                   state="visible", timeout=8_000)
+            passed.append(_check("'Tap to Begin' button visible after mic grant", True))
+        except Exception as e:
+            passed.append(_check("'Tap to Begin' button visible after mic grant",
+                                  False, str(e)))
+            ctx.close(); browser.close()
+            return passed
+
+        # ── Click: Tap to Begin ────────────────────────────────────────────
+        print("  [7.4] Clicking 'Tap to Begin'…")
+        try:
+            page.click("button:has-text('Tap to Begin')", timeout=5_000)
+            # Wait for the interview screen — question text renders at:
+            # <p class="text-base sm:text-lg font-medium text-slate-800 ...">
+            # We also accept "Question 1 of N" progress indicator
+            # "Question 1 of N" progress indicator appears when interview starts
+            page.wait_for_selector("text=Question 1 of",
+                                   state="visible", timeout=10_000)
+            passed.append(_check("First question visible after 'Tap to Begin'", True))
+        except Exception as e:
+            passed.append(_check("First question visible after 'Tap to Begin'",
+                                  False, str(e)))
+
+        ctx.close()
+        browser.close()
+
+    return passed
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 def check_services():
@@ -731,6 +905,9 @@ def run():
 
     # Test 6 — candidate application flow (browser, end-to-end)
     all_passed += test_candidate_application_flow(job_id, token)
+
+    # Test 7 — in_progress re-entry regression + full interview launch
+    all_passed += test_interview_launch(job_id, token)
 
     # ── Summary ───────────────────────────────────────────────────────────
     total  = len(all_passed)
