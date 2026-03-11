@@ -259,11 +259,14 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
   };
 
   const loadBankQuestions = async (title) => {
-    if (!title || title.length < 3) { setBankQuestions([]); return; }
+    // 'all' is a special value meaning "load all domains" (used on modal open)
+    const isAll = title === 'all';
+    if (!isAll && (!title || title.length < 3)) { setBankQuestions([]); return; }
     setBankLoading(true);
     try {
+      const domain = isAll ? 'all' : inferDomainFE(title);
       const res = await axios.get(`${INTERVIEW_API}/api/interview/question-bank`, {
-        params: { domain: inferDomainFE(title), limit: 20 },
+        params: { domain, limit: 20 },
       });
       setBankQuestions(res.data.questions || []);
     } catch (_) {

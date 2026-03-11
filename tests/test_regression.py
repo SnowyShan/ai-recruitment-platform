@@ -356,11 +356,13 @@ def test_question_bank_modal_visibility():
 
         passed.append(_check("Create Job modal opened", True))
 
-        # Without typing anything, wait up to 3s for the bank section to appear
+        # Without typing anything, wait up to 6s for the bank section to appear.
+        # The useEffect fires on mount → GET /question-bank?domain=all → React
+        # re-render; allow time for the network round-trip + render.
         bank_visible = False
-        for _ in range(30):
+        for _ in range(60):
             content = page.content()
-            if "question bank" in content.lower() or "Loading question bank" in content:
+            if "question bank" in content.lower() or "loading question bank" in content.lower():
                 bank_visible = True
                 break
             time.sleep(0.1)
