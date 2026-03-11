@@ -1,6 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import { useParams, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
+
+const ExcalidrawWrapper = lazy(() =>
+  import('@excalidraw/excalidraw').then(mod => ({ default: mod.Excalidraw }))
+)
 
 // ── TTS helpers ───────────────────────────────────────────────────────────────
 
@@ -49,7 +53,12 @@ export default function Interview() {
   const [verifyCoding, setVerifyCoding] = useState(state?.verify_coding_ability || false)
   const [codeAnswers, setCodeAnswers] = useState({})  // questionIndex → code string
   const codeAnswersRef = useRef({})
-  const [activeTab, setActiveTab] = useState({})       // questionIndex → 'voice' | 'code'
+  const [activeTab, setActiveTab] = useState({})       // questionIndex → 'voice' | 'code' | 'draw'
+
+  // Drawing (Excalidraw) state
+  const drawElementsRef = useRef({})   // questionIndex → elements array
+  const drawFilesRef = useRef({})      // questionIndex → files object
+  const excalidrawAPIRef = useRef(null)
 
   const [searchParams] = useSearchParams()
   const [tokenError, setTokenError] = useState(null)
@@ -496,11 +505,42 @@ export default function Interview() {
     })
 
     setFinishing(true)
+
+    // Export drawings to base64 PNGs
+    let drawAnswers = null
+    try {
+      const { exportToBlob } = await import('@excalidraw/excalidraw')
+      const entries = []
+      for (let i = 0; i < qs.length; i++) {
+        const els = drawElementsRef.current[i]
+        const nonDeleted = els?.filter(e => !e.isDeleted)
+        if (nonDeleted && nonDeleted.length > 0) {
+          const blob = await exportToBlob({
+            elements: nonDeleted,
+            files: drawFilesRef.current[i] || null,
+            mimeType: 'image/png',
+          })
+          const buf = await blob.arrayBuffer()
+          const bytes = new Uint8Array(buf)
+          let binary = ''
+          for (let j = 0; j < bytes.length; j++) binary += String.fromCharCode(bytes[j])
+          const b64 = btoa(binary)
+          entries.push(b64)
+        } else {
+          entries.push(null)
+        }
+      }
+      if (entries.some(e => e !== null)) drawAnswers = entries
+    } catch (err) {
+      console.warn('[Draw export]', err)
+    }
+
     try {
       await axios.post(`${API}/api/interview/session/${sessionId}/complete`, {
         full_transcript: fullTranscript,
         questions: qs,
         code_answers: Object.keys(codeAnswersRef.current).length > 0 ? codeAnswersRef.current : undefined,
+        draw_answers: drawAnswers,
       })
     } catch (e) { console.error(e) }
     if (tokenRef.current) {
@@ -687,42 +727,76 @@ export default function Interview() {
           <p className="text-xs text-slate-400 mt-3 italic">Recording starts automatically when the question finishes…</p>
         )}
 
-        {/* Tab bar — only for coding questions when coding is enabled */}
-        {verifyCoding && q.type === 'coding' && (
-          <>
-            <div className="flex gap-1 mt-4 border-b border-slate-200">
-              <button
-                onClick={() => setActiveTab(t => ({ ...t, [currentIndex]: 'voice' }))}
-                className={`px-4 py-2 text-sm font-medium transition-colors ${
-                  (activeTab[currentIndex] || 'voice') === 'voice'
-                    ? 'text-indigo-600 border-b-2 border-indigo-600'
-                    : 'text-slate-400 hover:text-slate-600'
-                }`}
-              >
-                🎤 Voice
-              </button>
-              <button
-                onClick={() => setActiveTab(t => ({ ...t, [currentIndex]: 'code' }))}
-                className={`px-4 py-2 text-sm font-medium transition-colors ${
-                  activeTab[currentIndex] === 'code'
-                    ? 'text-indigo-600 border-b-2 border-indigo-600'
-                    : 'text-slate-400 hover:text-slate-600'
-                }`}
-              >
-                💻 Code
-              </button>
-            </div>
+        {/* Tab bar — always shown */}
+        <div className="flex gap-1 mt-4 border-b border-slate-200">
+          <button
+            onClick={() => setActiveTab(t => ({ ...t, [currentIndex]: 'voice' }))}
+            className={`px-4 py-2 text-sm font-medium transition-colors ${
+              (activeTab[currentIndex] || 'voice') === 'voice'
+                ? 'text-indigo-600 border-b-2 border-indigo-600'
+                : 'text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            🎤 Voice
+          </button>
+          <button
+            onClick={() => setActiveTab(t => ({ ...t, [currentIndex]: 'code' }))}
+            className={`px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab[currentIndex] === 'code'
+                ? 'text-indigo-600 border-b-2 border-indigo-600'
+                : 'text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            💻 Code
+          </button>
+          <button
+            onClick={() => setActiveTab(t => ({ ...t, [currentIndex]: 'draw' }))}
+            className={`px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab[currentIndex] === 'draw'
+                ? 'text-indigo-600 border-b-2 border-indigo-600'
+                : 'text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            🎨 Draw
+          </button>
+        </div>
 
-            {activeTab[currentIndex] === 'code' && (
-              <textarea
-                value={codeAnswers[currentIndex] || ''}
-                onChange={e => setCodeAnswers(prev => ({ ...prev, [currentIndex]: e.target.value }))}
-                placeholder="Write your code or solution here..."
-                className="w-full min-h-[300px] mt-3 p-4 rounded-lg border border-slate-200 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-y"
-                style={{ fontFamily: 'monospace' }}
+        {activeTab[currentIndex] === 'code' && (
+          <textarea
+            value={codeAnswers[currentIndex] || ''}
+            onChange={e => setCodeAnswers(prev => ({ ...prev, [currentIndex]: e.target.value }))}
+            placeholder="Write your code or solution here..."
+            className="w-full min-h-[300px] mt-3 p-4 rounded-lg border border-slate-200 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-y"
+            style={{ fontFamily: 'monospace' }}
+          />
+        )}
+
+        {activeTab[currentIndex] === 'draw' && (
+          <div className="mt-3 border border-slate-200 rounded-lg overflow-hidden" style={{ height: 450 }}>
+            <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-400 text-sm">Loading canvas…</div>}>
+              <ExcalidrawWrapper
+                key={`excalidraw-${currentIndex}`}
+                excalidrawAPI={(api) => {
+                  excalidrawAPIRef.current = api
+                  window.__excalidrawAPI = api
+                  // Restore saved elements for this question
+                  const saved = drawElementsRef.current[currentIndex]
+                  if (saved && saved.length > 0) {
+                    setTimeout(() => {
+                      api.updateScene({ elements: saved })
+                    }, 100)
+                  }
+                }}
+                onChange={(elements, appState, files) => {
+                  drawElementsRef.current[currentIndex] = [...elements]
+                  if (files && Object.keys(files).length > 0) {
+                    drawFilesRef.current[currentIndex] = { ...files }
+                  }
+                }}
+                UIOptions={{ canvasActions: { saveAsImage: false, loadScene: false, export: false } }}
               />
-            )}
-          </>
+            </Suspense>
+          </div>
         )}
       </div>
 

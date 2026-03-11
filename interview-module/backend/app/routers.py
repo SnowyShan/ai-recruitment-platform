@@ -391,6 +391,7 @@ def get_session(session_id: str):
         "seniority_bar": row["seniority_bar"],
         "report": json.loads(row["report"]) if row["report"] else None,
         "verify_coding_ability": bool(row["verify_coding_ability"]) if "verify_coding_ability" in row.keys() else False,
+        "draw_answers": json.loads(row["draw_answers"]) if "draw_answers" in row.keys() and row["draw_answers"] else None,
     }
 
 
@@ -419,6 +420,7 @@ class CompleteRequest(BaseModel):
     full_transcript: Optional[str] = None
     questions: Optional[list] = None
     code_answers: Optional[dict] = None  # {questionIndex: codeString}
+    draw_answers: Optional[list] = None  # [base64PngString | null, ...]
 
 @session_router.post("/session/{session_id}/complete")
 def complete_session(session_id: str, req: CompleteRequest = CompleteRequest()):
@@ -431,9 +433,11 @@ def complete_session(session_id: str, req: CompleteRequest = CompleteRequest()):
     settings_row = conn.execute("SELECT value FROM settings WHERE key = 'evaluation_prompt'").fetchone()
     evaluation_prompt = settings_row["value"] if settings_row else ""
     code_answers = req.code_answers or {}
+    draw_answers = req.draw_answers or []
     report = ai.generate_report_from_transcript(
         row["job_description"], row["resume_text"], questions, full_transcript, evaluation_prompt,
         code_answers=code_answers,
+        draw_answers=draw_answers,
     )
 
     # Enrich per_question with answer_char_count extracted from full_transcript.
@@ -457,10 +461,14 @@ def complete_session(session_id: str, req: CompleteRequest = CompleteRequest()):
         code_key = str(i - 1)  # code_answers is 0-indexed
         if code_key in code_answers and code_answers[code_key].strip():
             pq["code_submission"] = code_answers[code_key]
+        # Attach draw submission (base64 PNG) if present
+        draw_idx = i - 1
+        if draw_idx < len(draw_answers) and draw_answers[draw_idx]:
+            pq["draw_submission"] = draw_answers[draw_idx]
 
     conn.execute(
-        "UPDATE sessions SET status='completed', report=?, completed_at=? WHERE id=?",
-        (json.dumps(report), datetime.utcnow().isoformat(), session_id)
+        "UPDATE sessions SET status='completed', report=?, draw_answers=?, completed_at=? WHERE id=?",
+        (json.dumps(report), json.dumps(draw_answers) if draw_answers else None, datetime.utcnow().isoformat(), session_id)
     )
     conn.commit()
     conn.close()

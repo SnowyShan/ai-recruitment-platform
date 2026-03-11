@@ -263,12 +263,13 @@ def _mock_report() -> dict:
     return {"overall_score": 72, "pass": True, "summary": "Mock report — add API key for real analysis.", "strengths": ["Communicates clearly"], "weaknesses": ["Needs more depth"], "hiring_recommendation": "Consider for next round.", "per_question": []}
 
 
-def generate_report_from_transcript(job_description: str, resume_text: str, questions: list, full_transcript: str, evaluation_prompt: str = "", code_answers: dict = None) -> dict:
+def generate_report_from_transcript(job_description: str, resume_text: str, questions: list, full_transcript: str, evaluation_prompt: str = "", code_answers: dict = None, draw_answers: list = None) -> dict:
     client = _client()
     if not client:
         return _mock_report()
 
     code_answers = code_answers or {}
+    draw_answers = draw_answers or []
 
     questions_list = ""
     for i, q in enumerate(questions):
@@ -277,24 +278,43 @@ def generate_report_from_transcript(job_description: str, resume_text: str, ques
             questions_list += "  [CODING QUESTION]"
         questions_list += "\n"
 
-    # Build code submissions section if any
+    # Build code submissions section — only include non-empty submissions
     code_section = ""
-    if code_answers:
+    non_empty_code = {k: v for k, v in code_answers.items() if v and v.strip()}
+    if non_empty_code:
         code_section = "\n\nCode Submissions (from the code editor):\n"
-        for idx_str, code in code_answers.items():
+        for idx_str, code in non_empty_code.items():
             code_section += f"--- Q{int(idx_str)+1} Code Answer ---\n{code}\n---\n\n"
 
     guidelines = evaluation_prompt.strip() if evaluation_prompt.strip() else "Evaluate answers fairly based on technical correctness and depth. For skipped questions, score 0."
 
     code_eval_guidelines = ""
-    if code_answers:
+    if non_empty_code:
         code_eval_guidelines = """
-For coding questions with submitted code:
+For questions with submitted code:
 - Analyze the code focusing on: logical correctness, problem decomposition, edge case awareness, and clarity of thinking.
 - Do NOT penalize for syntax errors or language-specific style issues.
 - Include a "code_analysis" field in the per_question entry with your analysis of the submitted code."""
 
-    prompt = f"""You are a senior technical interviewer writing a hiring evaluation report.
+    # Check which questions have drawings
+    non_empty_draws = {}
+    for i, da in enumerate(draw_answers):
+        if da and isinstance(da, str) and len(da) > 0:
+            non_empty_draws[i] = da
+
+    draw_eval_guidelines = ""
+    draw_section = ""
+    if non_empty_draws:
+        draw_section = "\n\nDrawing Submissions (from the whiteboard canvas):\n"
+        for idx, _ in non_empty_draws.items():
+            draw_section += f"- Q{idx+1}: Drawing submitted (see attached image)\n"
+        draw_eval_guidelines = """
+For questions with submitted drawings:
+- Analyze what the candidate drew: diagrams, flowcharts, architecture, data structures, etc.
+- Evaluate whether the drawing demonstrates understanding of the question and clear visual communication.
+- Include a "draw_analysis" field in the per_question entry with your analysis of the submitted drawing."""
+
+    prompt_text = f"""You are a senior technical interviewer writing a hiring evaluation report.
 
 Job Description:
 {job_description}
@@ -306,10 +326,10 @@ Interview Questions:
 {questions_list}
 
 Full Interview Transcript (questions marked with [Q1:], [Q2:] etc, [SKIPPED] means candidate skipped):
-{full_transcript}{code_section}
+{full_transcript}{code_section}{draw_section}
 
 Evaluation guidelines:
-{guidelines}{code_eval_guidelines}
+{guidelines}{code_eval_guidelines}{draw_eval_guidelines}
 
 Return ONLY valid JSON in this exact format:
 {{
@@ -326,16 +346,30 @@ Return ONLY valid JSON in this exact format:
       "feedback": "...",
       "what_was_good": "...",
       "what_was_missing": "...",
-      "code_analysis": "..."
+      "code_analysis": "...",
+      "draw_analysis": "..."
     }}
   ]
 }}
-Note: "code_analysis" should only be present for coding questions that have a code submission. Omit it for other questions."""
+Note: "code_analysis" should only be present for questions that have a non-empty code submission. "draw_analysis" should only be present for questions that have a drawing submission. Omit both for other questions."""
+
+    # Build multimodal content blocks when drawings are present
+    if non_empty_draws:
+        content_blocks = [{"type": "text", "text": prompt_text}]
+        for idx, b64_png in non_empty_draws.items():
+            content_blocks.append({"type": "text", "text": f"\n--- Q{idx+1} Drawing ---"})
+            content_blocks.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": b64_png}
+            })
+        message_content = content_blocks
+    else:
+        message_content = prompt_text
 
     resp = client.messages.create(
         model="claude-sonnet-4-5-20250929",
         max_tokens=3000,
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": message_content}]
     )
     text = resp.content[0].text.strip()
     start, end = text.find("{"), text.rfind("}") + 1

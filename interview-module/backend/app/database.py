@@ -38,6 +38,12 @@ def init_db():
     except Exception:
         pass  # Column already exists
 
+    # Add draw_answers column to sessions (stores JSON array of base64 PNGs)
+    try:
+        conn.execute("ALTER TABLE sessions ADD COLUMN draw_answers TEXT")
+    except Exception:
+        pass  # Column already exists
+
     # Settings
     conn.execute("""
         CREATE TABLE IF NOT EXISTS settings (

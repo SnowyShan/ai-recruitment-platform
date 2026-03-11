@@ -175,6 +175,23 @@ export default function Report() {
                           <p className="text-slate-600 text-sm">{pq.code_analysis}</p>
                         </div>
                       )}
+                      {pq.draw_submission && (
+                        <div className="mt-3">
+                          <p className="text-xs font-semibold text-slate-500 mb-1">Submitted Drawing</p>
+                          <img
+                            src={`data:image/png;base64,${pq.draw_submission}`}
+                            alt="Candidate drawing"
+                            className="max-w-full rounded-lg border border-slate-200"
+                            data-testid="draw-image"
+                          />
+                        </div>
+                      )}
+                      {pq.draw_analysis && (
+                        <div className="mt-2">
+                          <p className="text-xs font-semibold text-slate-500 mb-1">Drawing Analysis</p>
+                          <p className="text-slate-600 text-sm" data-testid="draw-analysis">{pq.draw_analysis}</p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
