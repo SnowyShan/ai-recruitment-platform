@@ -108,27 +108,24 @@ def _create_job(token):
 
 
 def _trigger_setup(job_id, token):
-    r = requests.post(
+    """Re-trigger setup via the TB backend (correct path — it builds the right payload)."""
+    headers = {"Authorization": f"Bearer {token}"}
+    requests.put(
         f"{TB_API}/api/jobs/{job_id}",
         json={"interview_num_questions": 4, "interview_difficulty": 3,
               "interview_seniority": "senior", "interview_behavioral_pct": 20},
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    # PUT triggers a setup re-run on the interview service — also try direct setup
-    requests.post(
-        f"{INTERVIEW_API}/api/interview/job/{job_id}/setup",
-        json={
-            "job_description": TEST_JOB["description"],
-            "num_questions":   4,
-            "difficulty":      3,
-            "seniority":       "senior",
-        },
+        headers=headers,
     )
 
 
 def _wait_for_setup(job_id, token, timeout=SETUP_TIMEOUT):
+    """
+    Poll setup status. If status=failed, re-trigger once (handles Anthropic
+    transient overload errors — 529s that fail the background task).
+    """
     headers = {"Authorization": f"Bearer {token}"}
     deadline = time.time() + timeout
+    retried = False
     print(f"    waiting", end="", flush=True)
     while time.time() < deadline:
         r = requests.get(f"{TB_API}/api/jobs/{job_id}/setup-status", headers=headers)
@@ -138,8 +135,15 @@ def _wait_for_setup(job_id, token, timeout=SETUP_TIMEOUT):
             if status == "ready":
                 print(" ready ✅")
                 return True
-            if status == "failed":
-                print(f" failed ❌  ({s})")
+            if status == "failed" and not retried:
+                # Transient failure (e.g. Anthropic 529 overload) — retry once
+                print(" failed, retrying", end="", flush=True)
+                _trigger_setup(job_id, token)
+                retried = True
+                time.sleep(5)
+                continue
+            if status == "failed" and retried:
+                print(f" failed after retry ❌")
                 return False
         time.sleep(3)
         print(".", end="", flush=True)
@@ -345,11 +349,8 @@ def test_question_bank_modal_visibility():
         for label in ("Create Job", "New Job", "Post Job", "Post"):
             try:
                 page.click(f"button:has-text('{label}')", timeout=3_000)
-                # Confirm modal actually appeared (dialog heading or form)
-                page.wait_for_selector(
-                    "text=Create New Job, form, [role='dialog']",
-                    timeout=3_000
-                )
+                # Confirm modal actually appeared by waiting for its heading
+                page.wait_for_selector("h2:has-text('Create New Job')", timeout=3_000)
                 modal_opened = True
                 break
             except Exception:
