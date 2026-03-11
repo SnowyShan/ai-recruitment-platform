@@ -183,11 +183,12 @@ async def validate_token(token: str, db: Session = Depends(get_db)):
     if not screening:
         return {"valid": False, "reason": "Invalid link. Please contact the recruiter."}
     if screening.invite_used:
-        return {"valid": False, "reason": "This interview link has already been used."}
+        return {"valid": False, "reason": "This interview has already been completed."}
     if screening.invite_expires_at and datetime.utcnow() > screening.invite_expires_at:
         return {"valid": False, "reason": "This interview link has expired. Please ask the recruiter for a new one."}
-    if screening.status == "in_progress":
-        return {"valid": False, "reason": "An interview session is already in progress."}
+    # Note: status="in_progress" is NOT blocked here — candidates must be able to
+    # rejoin if Safari refreshes or the Cloudflare interstitial reloads the page.
+    # Only invite_used=True (set after completion) blocks re-entry.
 
     return {
         "valid": True,
