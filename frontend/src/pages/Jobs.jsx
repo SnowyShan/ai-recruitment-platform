@@ -242,6 +242,11 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
   const [selectedQIds, setSelectedQIds] = useState([]);
   const titleDebounceRef = useRef(null);
 
+  // Load question bank on modal open (domain=general to show all available questions)
+  useEffect(() => {
+    loadBankQuestions('general');
+  }, []);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -419,7 +424,7 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
                 </label>
 
                 {/* Question bank selector */}
-                {bankQuestions.length > 0 && (
+                {(bankQuestions.length > 0 || bankLoading) && (
                   <div>
                     <button
                       type="button"
@@ -427,7 +432,9 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
                       className="w-full flex items-center justify-between text-sm font-medium text-primary-600 hover:text-primary-700"
                     >
                       <span>
-                        Reuse from question bank ({bankQuestions.length} available)
+                        {bankLoading && bankQuestions.length === 0
+                          ? 'Loading question bank…'
+                          : `Reuse from question bank (${bankQuestions.length} available)`}
                         {selectedQIds.length > 0 && ` · ${selectedQIds.length}/${numTechnical} selected`}
                       </span>
                       {bankOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -459,9 +466,6 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
                       </div>
                     )}
                   </div>
-                )}
-                {bankLoading && bankQuestions.length === 0 && (
-                  <p className="text-xs text-slate-400">Searching question bank…</p>
                 )}
               </div>
             </div>

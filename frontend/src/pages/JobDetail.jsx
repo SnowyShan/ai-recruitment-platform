@@ -773,8 +773,14 @@ Experience: 5 years of relevant industry experience.`;
           verify_coding_ability: screeningConfig.verify_coding_ability ?? false,
         }),
       });
-      const { session_id } = await res.json();
-      newWindow.location.href = `${INTERVIEW_URL}/interview/${session_id}`;
+      const payload = await res.json();
+      if (!res.ok || !payload.session_id) {
+        const detail = payload.detail || `Server error (${res.status})`;
+        newWindow.close();
+        alert(`Could not launch mock interview: ${detail}`);
+        return;
+      }
+      newWindow.location.href = `${INTERVIEW_URL}/interview/${payload.session_id}`;
     } catch (e) {
       console.error('Failed to launch mock interview', e);
       newWindow.close();
