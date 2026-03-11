@@ -629,6 +629,11 @@ def test_candidate_application_flow(job_id: int, recruiter_token: str,
                 before_you_begin,
                 page.url,
             ))
+
+            if before_you_begin and video_path:
+                # Hold on the "Before you begin" screen for 3s so it's
+                # clearly visible in the video recording before we close.
+                page.wait_for_timeout(3000)
         else:
             passed.append(_check("Interview link navigation skipped (no token)", False))
 
