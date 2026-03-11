@@ -340,19 +340,25 @@ def test_question_bank_modal_visibility():
         page.goto(f"{TB_URL}/jobs")
         page.wait_for_load_state("networkidle")
 
-        # Click "New Job" / "Create Job" button
-        try:
-            page.click("button:has-text('New Job')", timeout=5_000)
-        except Exception:
+        # Click the "Create Job" / "New Job" button — prefer exact text match
+        modal_opened = False
+        for label in ("Create Job", "New Job", "Post Job", "Post"):
             try:
-                page.click("button:has-text('Create Job')", timeout=3_000)
+                page.click(f"button:has-text('{label}')", timeout=3_000)
+                # Confirm modal actually appeared (dialog heading or form)
+                page.wait_for_selector(
+                    "text=Create New Job, form, [role='dialog']",
+                    timeout=3_000
+                )
+                modal_opened = True
+                break
             except Exception:
-                try:
-                    page.click("button:has-text('Post')", timeout=3_000)
-                except Exception as e:
-                    passed.append(_check("Create Job button found", False, str(e)))
-                    ctx.close(); browser.close()
-                    return passed
+                continue
+
+        if not modal_opened:
+            passed.append(_check("Create Job modal opened", False, "no modal appeared after clicking button"))
+            ctx.close(); browser.close()
+            return passed
 
         passed.append(_check("Create Job modal opened", True))
 
