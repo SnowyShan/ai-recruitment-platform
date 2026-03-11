@@ -220,6 +220,7 @@ async def public_apply(
                         seniority_bar=_job.interview_seniority or "mid" if _job else "mid",
                         time_limit=_job.interview_time_limit or 45 if _job else 45,
                         num_questions=_job.interview_num_questions or 8 if _job else 8,
+                        job_id=_job.id if _job else None,
                     )
                     invite_token = str(uuid.uuid4())
                     now = datetime.utcnow()

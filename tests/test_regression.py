@@ -20,24 +20,32 @@ Covers 4 specific failure modes that were introduced or exposed:
   4. QUESTION BANK VISIBILITY — question bank endpoint must return questions
      after setup completes, and must respond to domain=general (used on modal open)
 
+  6. CANDIDATE APPLICATION FLOW — end-to-end browser test:
+     Browse openings → click job → fill form + upload resume → Apply →
+     assert auto-invite screening created with invite_sent_at set →
+     navigate to interview link → assert "Before you begin" page loads.
+
 FAST: tests 1, 2 (partial), 4 use only requests — no browser.
-BROWSER: test 3 partial + a Playwright check that the create-job modal shows
-         the question bank section immediately on open (not after title typing).
+BROWSER: test 5 (create-job modal), test 6 (candidate application flow).
 
 SERVICES REQUIRED (all must be running):
   localhost:8000  — TalentBridge backend
   localhost:8001  — Interview module backend
-  localhost:5173  — TalentBridge frontend  (browser tests only)
+  localhost:5173  — TalentBridge frontend
+  localhost:5174  — Interview module frontend  (test 6)
 """
 
+import io
+import os
 import sys
 import time
 import uuid
 import requests
 
-TB_API        = "http://localhost:8000"
-INTERVIEW_API = "http://localhost:8001"
-TB_URL        = "http://localhost:5173"
+TB_API           = "http://localhost:8000"
+INTERVIEW_API    = "http://localhost:8001"
+TB_URL           = "http://localhost:5173"
+INTERVIEW_URL    = "http://localhost:5174"
 
 # Unique suffix so concurrent runs don't collide
 _RUN_ID = uuid.uuid4().hex[:8]
@@ -385,15 +393,276 @@ def test_question_bank_modal_visibility():
     return passed
 
 
+# ── Test 6: Candidate application flow (full browser) ────────────────────────
+
+def _make_resume_pdf() -> bytes:
+    """
+    Generate a minimal but keyword-rich iOS resume PDF.
+    The sentence-transformer scorer is local and deterministic —
+    heavy Swift/UIKit/iOS vocabulary reliably scores ≥ 70 against
+    an iOS job description.
+    """
+    from fpdf import FPDF
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_margins(15, 15, 15)
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, "Alex Johnson - Senior iOS Engineer", ln=True)
+    pdf.set_font("Helvetica", size=10)
+    lines = [
+        "EXPERIENCE",
+        "Senior iOS Engineer, Acme Corp, 2019-present",
+        "Architected and shipped features in Swift UIKit and SwiftUI.",
+        "Deep expertise in ARC memory management with weak and unowned references.",
+        "Led migration from Objective-C to Swift with async/await and Combine.",
+        "Built custom UICollectionView layouts and optimised Core Data queries.",
+        "Used Instruments Leaks and Allocations to fix memory leaks.",
+        "",
+        "iOS Engineer, StartupXYZ, 2016-2019",
+        "Developed iPhone and iPad apps using Swift and Xcode.",
+        "Integrated REST APIs with URLSession and Codable.",
+        "Used Core Location MapKit and APNs push notifications.",
+        "Wrote unit tests with XCTest.",
+        "",
+        "SKILLS",
+        "Swift Objective-C SwiftUI UIKit Xcode ARC Combine Core Data",
+        "Core Location MapKit XCTest Instruments APNs CocoaPods Git",
+        "",
+        "EDUCATION",
+        "BSc Computer Science Stanford University 2016",
+    ]
+    for line in lines:
+        pdf.cell(0, 6, line, ln=True)
+    return bytes(pdf.output())
+
+
+def test_candidate_application_flow(job_id: int, recruiter_token: str,
+                                     video_path: str = None):
+    """
+    TEST 6 — Candidate application + auto-invite + interview launch.
+
+    Browser steps (no auth — public-facing pages):
+      1. Visit /browse-jobs
+      2. Find and click the test job → /browse-jobs/{job_id}
+      3. Fill Full Name + Email, upload PDF resume
+      4. Click Apply
+      5. Assert success confirmation screen
+
+    API steps (test infrastructure — extracting the invite the candidate
+    would have received by email):
+      6. Assert screening record exists with invite_sent_at set
+      7. Extract session_id + invite_token
+
+    Browser steps (candidate clicks link from email):
+      8. Navigate to interview URL with token
+      9. Assert "Before you begin" page renders
+    """
+    print("\n[Test 6] Candidate application flow — browse → apply → invite → interview")
+    passed = []
+
+    # ── Setup: enable auto-invite and publish the job ──────────────────────
+    headers = {"Authorization": f"Bearer {recruiter_token}"}
+
+    # Enable auto-invite with threshold=70
+    r = requests.put(f"{TB_API}/api/settings/",
+                     json={"auto_invite_screening": True, "auto_invite_threshold": 70},
+                     headers=headers)
+    passed.append(_check("Auto-invite enabled via settings API",
+                          r.status_code == 200, f"HTTP {r.status_code}"))
+
+    # Publish the job so it appears on browse page
+    r = requests.post(f"{TB_API}/api/jobs/{job_id}/publish", headers=headers)
+    published_ok = r.status_code in (200, 201)
+    passed.append(_check(f"Job {job_id} published (status=active)",
+                          published_ok, f"HTTP {r.status_code}"))
+    if not published_ok:
+        print(f"    publish detail: {r.text[:200]}")
+
+    # Build resume PDF once — reused for the file upload
+    resume_pdf = _make_resume_pdf()
+    candidate_name  = f"Test Candidate {_RUN_ID[:6]}"
+    candidate_email = f"candidate-{_RUN_ID}@test.internal"
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  ⚠️  playwright not installed — skipping browser test")
+        return passed
+
+    # Playwright context — optionally record video
+    launch_kwargs  = {"headless": True}
+    context_kwargs = {"viewport": {"width": 1280, "height": 900}}
+    if video_path:
+        context_kwargs["record_video_dir"] = os.path.dirname(video_path)
+        context_kwargs["record_video_size"] = {"width": 1280, "height": 900}
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch_kwargs)
+        ctx  = browser.new_context(**context_kwargs)
+        page = ctx.new_page()
+
+        # ── Step 1: Browse openings ────────────────────────────────────────
+        print("  [6.1] Browsing openings…")
+        page.goto(f"{TB_URL}/browse-jobs")
+        page.wait_for_load_state("networkidle")
+
+        browse_ok = "browse" in page.url or page.query_selector("text=Browse") is not None
+        passed.append(_check("Browse jobs page loaded",
+                              page.url.endswith("/browse-jobs") or "browse-jobs" in page.url,
+                              page.url))
+
+        # ── Step 2: Find the test job and click View & Apply ──────────────
+        print("  [6.2] Finding test job card…")
+        job_title_fragment = TEST_JOB["title"][:20]  # enough to be unique
+
+        try:
+            # Wait for job cards to render
+            page.wait_for_selector(f"text={job_title_fragment}", timeout=8_000)
+            # Click the "View & Apply" link for this job specifically
+            page.locator(f"text={job_title_fragment}").locator("..").locator("..").locator("a:has-text('View & Apply')").first.click()
+        except Exception:
+            # Fallback: navigate directly
+            page.goto(f"{TB_URL}/browse-jobs/{job_id}")
+
+        page.wait_for_load_state("networkidle")
+        on_apply_page = f"/browse-jobs/{job_id}" in page.url
+        passed.append(_check(f"Navigated to job apply page (/browse-jobs/{job_id})",
+                              on_apply_page, page.url))
+
+        # ── Step 3: Fill application form ─────────────────────────────────
+        print("  [6.3] Filling application form…")
+        try:
+            page.wait_for_selector('input[name="full_name"]', timeout=5_000)
+            page.fill('input[name="full_name"]', candidate_name)
+            page.fill('input[type="email"]',     candidate_email)
+            passed.append(_check("Form fields filled", True))
+        except Exception as e:
+            passed.append(_check("Form fields filled", False, str(e)))
+
+        # ── Step 4: Upload PDF resume ──────────────────────────────────────
+        print("  [6.4] Uploading resume PDF…")
+        import tempfile
+        tmp_path = None
+        try:
+            # Write PDF to a temp file. Do NOT delete until after submit — Playwright
+            # reads the file lazily at form submission time, not at set_input_files time.
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                tmp.write(resume_pdf)
+                tmp_path = tmp.name
+            page.locator('input[type="file"]').set_input_files(tmp_path)
+            passed.append(_check("Resume PDF attached to form", True))
+        except Exception as e:
+            passed.append(_check("Resume PDF attached to form", False, str(e)))
+
+        # ── Step 5: Submit application ────────────────────────────────────
+        print("  [6.5] Submitting application…")
+        try:
+            page.click('button[type="submit"]', timeout=5_000)
+            # analyze_resume (sentence-transformers) runs synchronously in the
+            # request handler — allow up to 30s for the model to score the resume
+            page.wait_for_selector("h2:has-text('Application Submitted')", timeout=30_000)
+            passed.append(_check("Application submitted — success screen shown", True))
+        except Exception as e:
+            passed.append(_check("Application submitted — success screen shown", False, str(e)))
+            page.screenshot(path="/tmp/apply_fail.png")
+        finally:
+            # Safe to delete now — browser has finished reading the file
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+        # ── Step 6 & 7: Verify screening + extract token (API) ────────────
+        print("  [6.6] Verifying auto-invite screening record…")
+
+        # Get application_id from the apply response (we'll use the email to look it up)
+        time.sleep(2)  # small wait for DB commit
+        r = requests.get(f"{TB_API}/api/public/status",
+                         params={"email": candidate_email})
+        app_id = None
+        if r.status_code == 200:
+            apps = r.json()
+            if apps:
+                app_id = apps[0].get("id")
+
+        screening = None
+        if app_id:
+            sr = requests.get(f"{TB_API}/api/screenings/",
+                              params={"application_id": app_id},
+                              headers=headers)
+            if sr.status_code == 200 and sr.json():
+                screening = sr.json()[0]
+
+        has_screening = screening is not None
+        passed.append(_check("Screening record created (auto-invite triggered)",
+                              has_screening))
+
+        invite_sent = screening and screening.get("invite_sent_at") is not None
+        passed.append(_check("invite_sent_at is set (email dispatch attempted)",
+                              invite_sent,
+                              str(screening.get("invite_sent_at") if screening else None)))
+
+        session_id   = screening.get("interview_session_id") if screening else None
+        invite_token = screening.get("invite_token")         if screening else None
+
+        has_token = bool(session_id and invite_token)
+        passed.append(_check("session_id + invite_token present in screening record",
+                              has_token,
+                              f"session={session_id}, token={str(invite_token)[:8]}…" if has_token else "missing"))
+
+        # ── Step 8 & 9: Navigate to interview link ─────────────────────────
+        if has_token:
+            print("  [6.8] Navigating to interview link (as candidate)…")
+            interview_link = f"{INTERVIEW_URL}/interview/{session_id}?token={invite_token}"
+            page.goto(interview_link)
+            page.wait_for_load_state("networkidle")
+
+            # Wait up to 8s for "Before you begin" to render
+            # (token validation makes a round-trip to the TB backend)
+            before_you_begin = False
+            for _ in range(80):
+                if "before you begin" in page.content().lower():
+                    before_you_begin = True
+                    break
+                time.sleep(0.1)
+
+            passed.append(_check(
+                "Interview module shows 'Before you begin' page",
+                before_you_begin,
+                page.url,
+            ))
+        else:
+            passed.append(_check("Interview link navigation skipped (no token)", False))
+
+        # Save video
+        if video_path:
+            ctx.close()  # must close context before video is written
+            browser.close()
+            # Playwright saves video as a random name in the dir — rename it
+            vid_dir = os.path.dirname(video_path)
+            vids = sorted(
+                [f for f in os.listdir(vid_dir) if f.endswith(".webm")],
+                key=lambda f: os.path.getmtime(os.path.join(vid_dir, f)),
+            )
+            if vids:
+                src = os.path.join(vid_dir, vids[-1])
+                os.rename(src, video_path)
+                print(f"  📹 Video saved: {video_path}")
+        else:
+            ctx.close()
+            browser.close()
+
+    return passed
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 def check_services():
     print("Checking services…")
     ok = True
     for name, url in [
-        ("TB backend",        f"{TB_API}/health"),
-        ("Interview backend", f"{INTERVIEW_API}/health"),
-        ("TB frontend",       TB_URL),
+        ("TB backend",           f"{TB_API}/health"),
+        ("Interview backend",    f"{INTERVIEW_API}/health"),
+        ("TB frontend",          TB_URL),
+        ("Interview frontend",   INTERVIEW_URL),
     ]:
         try:
             r = requests.get(url, timeout=5)
@@ -451,6 +720,9 @@ def run():
 
     # Test 5 — browser: bank visible on modal open
     all_passed += test_question_bank_modal_visibility()
+
+    # Test 6 — candidate application flow (browser, end-to-end)
+    all_passed += test_candidate_application_flow(job_id, token)
 
     # ── Summary ───────────────────────────────────────────────────────────
     total  = len(all_passed)
