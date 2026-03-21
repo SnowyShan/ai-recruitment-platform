@@ -5,6 +5,7 @@ Swap provider via VIDEO_PROVIDER env var ("did" | "mock").
 """
 
 import os, uuid, time, base64, logging
+from typing import Optional
 import httpx
 
 from .database import VIDEO_DIR
@@ -22,7 +23,7 @@ POLL_TIMEOUT = 90       # seconds
 class VideoProvider:
     """Base class — subclass and override generate_talking_head."""
 
-    def generate_talking_head(self, audio_path: str, text: str) -> str | None:
+    def generate_talking_head(self, audio_path: str, text: str) -> Optional[str]:
         """Generate a talking-head video.
 
         Returns the local .mp4 file path on success, None on failure.
@@ -43,7 +44,7 @@ class DIDProvider(VideoProvider):
         self._auth = "Basic " + api_key
         self._presenter = os.getenv("DID_PRESENTER_URL", DID_DEFAULT_PRESENTER)
 
-    def generate_talking_head(self, audio_path: str, text: str) -> str | None:
+    def generate_talking_head(self, audio_path: str, text: str) -> Optional[str]:
         if not text or not text.strip():
             return None
         try:
@@ -52,7 +53,7 @@ class DIDProvider(VideoProvider):
             log.warning("[D-ID] Video generation failed: %s", e)
             return None
 
-    def _create_and_download(self, text: str) -> str | None:
+    def _create_and_download(self, text: str) -> Optional[str]:
         headers = {
             "Authorization": self._auth,
             "Content-Type": "application/json",
@@ -104,7 +105,7 @@ class DIDProvider(VideoProvider):
         log.warning("[D-ID] Talk %s timed out after %ds", talk_id, POLL_TIMEOUT)
         return None
 
-    def _download(self, url: str, talk_id: str) -> str | None:
+    def _download(self, url: str, talk_id: str) -> Optional[str]:
         resp = httpx.get(url, timeout=30.0, follow_redirects=True)
         resp.raise_for_status()
         os.makedirs(VIDEO_DIR, exist_ok=True)
@@ -117,7 +118,7 @@ class DIDProvider(VideoProvider):
 class MockProvider(VideoProvider):
     """Returns None immediately. Used when VIDEO_PROVIDER=mock or DID_API_KEY not set."""
 
-    def generate_talking_head(self, audio_path: str, text: str) -> str | None:
+    def generate_talking_head(self, audio_path: str, text: str) -> Optional[str]:
         return None
 
 
