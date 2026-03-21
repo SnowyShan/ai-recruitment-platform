@@ -758,11 +758,10 @@ export default function Interview() {
           <p className="text-xs text-slate-400 mt-3 italic">Recording starts automatically when the question finishes…</p>
         )}
 
-        {/* Recruiter video bubble — circular, bottom-right, visible while speaking */}
-        {videoInterviewEnabled && q?.video_url && isSpeaking && (
+        {/* Recruiter video bubble — always mounted when video mode on so ref is available immediately */}
+        {videoInterviewEnabled && q?.video_url && (
           <video
             ref={videoRef}
-            autoPlay
             playsInline
             style={{
               position: 'absolute',
@@ -774,6 +773,7 @@ export default function Interview() {
               objectFit: 'cover',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               pointerEvents: 'none',
+              display: isSpeaking ? 'block' : 'none',
             }}
           />
         )}
