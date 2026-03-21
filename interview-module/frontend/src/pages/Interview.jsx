@@ -125,20 +125,6 @@ export default function Interview() {
   const micReady  = introPhase === 'started'
   const started   = introPhase === 'started'
 
-  // Update recruiter video bubble when question changes
-  useEffect(() => {
-    if (!videoInterviewEnabled || !started) return
-    const currentQ = questions[currentIndex]
-    const vid = videoRef.current
-    if (!vid) return
-    if (currentQ?.video_url) {
-      vid.src = `${API}${currentQ.video_url}`
-      vid.play().catch(() => {})
-    } else {
-      vid.removeAttribute('src')
-      vid.load()
-    }
-  }, [currentIndex, questions, videoInterviewEnabled, started])
   // Map of question index → pre-fetched blob URL (all questions fetched in parallel during 'ready' phase)
   const prefetchedAudioMapRef = useRef({})
 
@@ -373,27 +359,38 @@ export default function Interview() {
   }, [])
 
   // Speak questions — gated on both micReady and started (user tapped "Tap to Begin").
+  // When video interview is enabled AND the question has a video, the D-ID video
+  // provides the audio — skip TTS and drive isSpeaking from video events instead.
   useEffect(() => {
     if (!micReady || !started) return
     if (questions.length === 0) return
     const q = questions[currentIndex]
     if (!q) return
-    // Guard: only speak each question index once. Prevents re-triggering when
-    // `questions` state updates mid-interview (API fetch completing after start).
     if (spokenIndexRef.current === currentIndex) return
     spokenIndexRef.current = currentIndex
-    speakThenRecord(q?.voice_text || q?.question || '')
-  }, [currentIndex, questions, speakThenRecord, micReady, started])
 
-  // Play video bubble when question changes (if video interview enabled)
-  useEffect(() => {
-    if (!videoInterviewEnabled || !started) return
-    const q = questions[currentIndex]
-    const videoUrl = q?.video_url
-    if (!videoUrl || !videoRef.current) return
-    videoRef.current.src = `${API}${videoUrl}`
-    videoRef.current.play().catch(() => {})
-  }, [currentIndex, questions, videoInterviewEnabled, started])
+    if (videoInterviewEnabled && q?.video_url && videoRef.current) {
+      // D-ID video has audio baked in — play it, drive isSpeaking from events
+      const vid = videoRef.current
+      vid.src = `${API}${q.video_url}`
+      setIsSpeaking(true)
+      vid.onended = () => {
+        setIsSpeaking(false)
+        startRecording()
+      }
+      vid.onerror = () => {
+        setIsSpeaking(false)
+        // Fall back to TTS if video fails
+        speakThenRecord(q?.voice_text || q?.question || '')
+      }
+      vid.play().catch(() => {
+        setIsSpeaking(false)
+        speakThenRecord(q?.voice_text || q?.question || '')
+      })
+    } else {
+      speakThenRecord(q?.voice_text || q?.question || '')
+    }
+  }, [currentIndex, questions, speakThenRecord, micReady, started, videoInterviewEnabled])
 
   const replayQuestion = async () => {
     const q = questionsRef.current[currentIndexRef.current]
