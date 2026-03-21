@@ -178,10 +178,22 @@ def generate_videos_for_job(job_id: int, background_tasks: BackgroundTasks):
     return {"status": "generating_videos", "job_id": job_id, "num_questions": len(question_ids)}
 
 
+def _get_video_provider_setting() -> str:
+    """Read video_provider from DB settings (falls back to env var / 'did')."""
+    try:
+        conn = get_conn()
+        row = conn.execute("SELECT value FROM settings WHERE key='video_provider'").fetchone()
+        conn.close()
+        return row["value"] if row else os.getenv("VIDEO_PROVIDER", "did")
+    except Exception:
+        return os.getenv("VIDEO_PROVIDER", "did")
+
+
 def _generate_videos_bg(job_id: int, question_ids: list):
-    """Background task: generate D-ID videos for questions that don't have one yet."""
-    print(f"[VIDEO GEN] Job {job_id}: generating videos for {len(question_ids)} questions")
-    video_provider = vc.get_provider()
+    """Background task: generate talking-head videos for questions that don't have one yet."""
+    provider_name = _get_video_provider_setting()
+    print(f"[VIDEO GEN] Job {job_id}: generating videos for {len(question_ids)} questions via {provider_name}")
+    video_provider = vc.get_provider(provider_name)
     for q_id in question_ids:
         conn = get_conn()
         row = conn.execute("SELECT question, voice_text, video_path, audio_path FROM questions WHERE id=?", (q_id,)).fetchone()
@@ -239,7 +251,7 @@ def _run_job_setup(job_id: int, req: JobSetupRequest):
                 # Generate talking-head video only if explicitly requested
                 video_filename_stored = None
                 if req.generate_video:
-                    video_provider = vc.get_provider()
+                    video_provider = vc.get_provider(_get_video_provider_setting())
                     video_result = video_provider.generate_talking_head(
                         audio_path=audio_path,
                         text=q.get("voice_text") or q["question"],
@@ -614,25 +626,42 @@ settings_router = APIRouter(prefix="/api/interview", tags=["Settings"])
 
 class SettingsResponse(BaseModel):
     evaluation_prompt: str
+    video_provider: str = "did"  # "did" | "heygen" | "mock"
 
 class SettingsUpdate(BaseModel):
-    evaluation_prompt: str
+    evaluation_prompt: Optional[str] = None
+    video_provider: Optional[str] = None
+
+def _get_setting(conn, key: str, default: str = "") -> str:
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+def _set_setting(conn, key: str, value: str):
+    conn.execute(
+        "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        (key, value, datetime.utcnow().isoformat())
+    )
 
 @settings_router.get("/settings")
 def get_settings():
     conn = get_conn()
-    row = conn.execute("SELECT value FROM settings WHERE key = 'evaluation_prompt'").fetchone()
+    evaluation_prompt = _get_setting(conn, "evaluation_prompt", "")
+    video_provider    = _get_setting(conn, "video_provider", os.getenv("VIDEO_PROVIDER", "did"))
     conn.close()
-    return SettingsResponse(evaluation_prompt=row["value"] if row else "")
+    return SettingsResponse(evaluation_prompt=evaluation_prompt, video_provider=video_provider)
 
 @settings_router.put("/settings")
 def update_settings(req: SettingsUpdate):
     conn = get_conn()
-    conn.execute(
-        "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-        ("evaluation_prompt", req.evaluation_prompt, datetime.utcnow().isoformat())
-    )
+    if req.evaluation_prompt is not None:
+        _set_setting(conn, "evaluation_prompt", req.evaluation_prompt)
+    if req.video_provider is not None:
+        allowed = {"did", "heygen", "mock"}
+        if req.video_provider not in allowed:
+            conn.close()
+            raise HTTPException(status_code=400, detail=f"video_provider must be one of: {allowed}")
+        _set_setting(conn, "video_provider", req.video_provider)
     conn.commit()
     conn.close()
-    return SettingsResponse(evaluation_prompt=req.evaluation_prompt)
+    return get_settings()
