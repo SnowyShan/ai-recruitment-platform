@@ -369,24 +369,34 @@ export default function Interview() {
     if (spokenIndexRef.current === currentIndex) return
     spokenIndexRef.current = currentIndex
 
-    if (videoInterviewEnabled && q?.video_url && videoRef.current) {
-      // D-ID video has audio baked in — play it, drive isSpeaking from events
-      const vid = videoRef.current
-      vid.src = `${API}${q.video_url}`
-      setIsSpeaking(true)
-      vid.onended = () => {
-        setIsSpeaking(false)
-        startRecording()
+    if (videoInterviewEnabled && q?.video_url) {
+      // D-ID video has audio baked in — play it, skip TTS entirely
+      // Defer one tick so the video element is guaranteed mounted in the DOM
+      const playVideo = () => {
+        const vid = videoRef.current
+        if (!vid) {
+          // Still not mounted — fall back to TTS
+          speakThenRecord(q?.voice_text || q?.question || '')
+          return
+        }
+        vid.src = `${API}${q.video_url}`
+        vid.onended = () => {
+          setIsSpeaking(false)
+          if (!finishedRef.current) startRecording()
+        }
+        vid.onerror = () => {
+          setIsSpeaking(false)
+          speakThenRecord(q?.voice_text || q?.question || '')
+        }
+        vid.play()
+          .then(() => setIsSpeaking(true))
+          .catch(() => {
+            setIsSpeaking(false)
+            speakThenRecord(q?.voice_text || q?.question || '')
+          })
       }
-      vid.onerror = () => {
-        setIsSpeaking(false)
-        // Fall back to TTS if video fails
-        speakThenRecord(q?.voice_text || q?.question || '')
-      }
-      vid.play().catch(() => {
-        setIsSpeaking(false)
-        speakThenRecord(q?.voice_text || q?.question || '')
-      })
+      // Defer one tick to ensure React has mounted the video element
+      setTimeout(playVideo, 0)
     } else {
       speakThenRecord(q?.voice_text || q?.question || '')
     }
@@ -773,7 +783,7 @@ export default function Interview() {
               objectFit: 'cover',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               pointerEvents: 'none',
-              display: isSpeaking ? 'block' : 'none',
+              display: isSpeaking ? 'block' : 'none',  // shown while D-ID video plays
             }}
           />
         )}
