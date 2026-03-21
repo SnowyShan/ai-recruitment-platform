@@ -361,6 +361,7 @@ async def get_setup_status(
                 "progress_current": data.get("progress_current", 0),
                 "progress_total": data.get("progress_total", 0),
                 "domain": data.get("domain"),
+                "video_interview_enabled": data.get("video_interview_enabled", False),
             }
     except Exception:
         pass

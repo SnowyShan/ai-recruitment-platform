@@ -26,6 +26,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { jobsAPI, applicationsAPI, screeningsAPI } from '../services/api';
+import axios from 'axios';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -679,6 +680,42 @@ export default function JobDetail() {
   const [configSaved, setConfigSaved] = useState(false);
   const [launchingMock, setLaunchingMock] = useState(false);
 
+  // Video interview mode
+  const [videoModeEnabled, setVideoModeEnabled] = useState(false);
+  const [videoModeLoading, setVideoModeLoading] = useState(false);
+  const [jobQuestions, setJobQuestions] = useState([]);
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
+  const INTERVIEW_API = import.meta.env.VITE_INTERVIEW_API_URL || 'http://localhost:8001';
+
+  // Fetch video mode + question list when setup is ready
+  useEffect(() => {
+    if (setupStatus !== 'ready' || !id) return;
+    const load = async () => {
+      try {
+        const res = await axios.get(`${INTERVIEW_API}/api/interview/job/${id}/setup/status`);
+        setVideoModeEnabled(!!res.data.video_interview_enabled);
+      } catch (_) {}
+      try {
+        const res = await axios.get(`${INTERVIEW_API}/api/interview/question-bank`, { params: { domain: 'all', limit: 50 } });
+        setJobQuestions(res.data.questions || []);
+      } catch (_) {}
+    };
+    load();
+  }, [setupStatus, id, INTERVIEW_API]);
+
+  const toggleVideoMode = async () => {
+    setVideoModeLoading(true);
+    try {
+      const newVal = !videoModeEnabled;
+      await axios.put(`${INTERVIEW_API}/api/interview/job/${id}/video-mode`, { enabled: newVal });
+      setVideoModeEnabled(newVal);
+    } catch (err) {
+      console.error('Failed to toggle video mode', err);
+    } finally {
+      setVideoModeLoading(false);
+    }
+  };
+
   // Setup status polling
   const [setupStatus, setSetupStatus] = useState(null); // null | 'generating' | 'ready' | 'failed'
   const [setupProgress, setSetupProgress] = useState({ current: 0, total: 0 });
@@ -1053,6 +1090,51 @@ Experience: 5 years of relevant industry experience.`;
                   <p className="text-xs text-slate-500 mt-0.5">Adds a logic-based coding question to the interview. Candidate can type their solution.</p>
                 </div>
               </label>
+            </div>
+
+            {/* Video interview mode toggle */}
+            <div className="sm:col-span-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-medium text-slate-700">Video Interview</span>
+                  <p className="text-xs text-slate-500 mt-0.5">Show a recruiter avatar speaking each question during the interview.</p>
+                </div>
+                <button
+                  onClick={toggleVideoMode}
+                  disabled={videoModeLoading || setupStatus !== 'ready'}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50 ${
+                    videoModeEnabled ? 'bg-indigo-600' : 'bg-slate-200'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      videoModeEnabled ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+              {jobQuestions.filter(q => q.video_path).length > 0 && (
+                <div className="mt-3 space-y-1 max-h-40 overflow-y-auto">
+                  {jobQuestions.filter(q => q.video_path).map(q => (
+                    <div key={q.id} className="flex items-center justify-between gap-2 text-xs text-slate-600 py-1.5 border-b border-slate-100 last:border-0">
+                      <span className="truncate flex-1">{q.question}</span>
+                      <button
+                        onClick={() => setVideoPreviewUrl(
+                          videoPreviewUrl === `${INTERVIEW_API}/video/${q.video_path}` ? null : `${INTERVIEW_API}/video/${q.video_path}`
+                        )}
+                        className="text-indigo-600 hover:text-indigo-800 font-medium flex-shrink-0"
+                      >
+                        Preview
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {videoPreviewUrl && (
+                <div className="mt-3 flex justify-center">
+                  <video src={videoPreviewUrl} controls autoPlay className="rounded-xl max-h-48 shadow-sm border border-slate-200" />
+                </div>
+              )}
             </div>
 
             {/* Save + Mock Interview buttons */}

@@ -61,6 +61,10 @@ export default function Interview() {
   const drawAppStateRef = useRef({})   // questionIndex → appState snapshot
   const excalidrawAPIRef = useRef(null)
 
+  // Video interview state
+  const [videoInterviewEnabled, setVideoInterviewEnabled] = useState(false)
+  const videoRef = useRef(null)
+
   const [searchParams] = useSearchParams()
   const [tokenError, setTokenError] = useState(null)
   const [tokenChecked, setTokenChecked] = useState(false)
@@ -105,11 +109,27 @@ export default function Interview() {
         setQuestions(data.questions)
         setTimeLeft(data.time_limit * 60)
         if (data.verify_coding_ability) setVerifyCoding(true)
+        if (data.video_interview_enabled) setVideoInterviewEnabled(true)
       })
     }
   }, [sessionId])
 
-    // Pre-interview intro phase:
+  // Update recruiter video bubble when question changes
+  useEffect(() => {
+    if (!videoInterviewEnabled || !started) return
+    const currentQ = questions[currentIndex]
+    const vid = videoRef.current
+    if (!vid) return
+    if (currentQ?.video_url) {
+      vid.src = `${API}${currentQ.video_url}`
+      vid.play().catch(() => {})
+    } else {
+      vid.removeAttribute('src')
+      vid.load()
+    }
+  }, [currentIndex, questions, videoInterviewEnabled, started])
+
+  // Pre-interview intro phase:
   //   'intro'    → instructions screen, mic not yet requested
   //   'granting' → getUserMedia in flight, spinner on button
   //   'ready'    → mic granted/denied, "Start Interview" button shown, Q0 audio pre-fetching
@@ -363,6 +383,16 @@ export default function Interview() {
     spokenIndexRef.current = currentIndex
     speakThenRecord(q?.voice_text || q?.question || '')
   }, [currentIndex, questions, speakThenRecord, micReady, started])
+
+  // Play video bubble when question changes (if video interview enabled)
+  useEffect(() => {
+    if (!videoInterviewEnabled || !started) return
+    const q = questions[currentIndex]
+    const videoUrl = q?.video_url
+    if (!videoUrl || !videoRef.current) return
+    videoRef.current.src = `${API}${videoUrl}`
+    videoRef.current.play().catch(() => {})
+  }, [currentIndex, questions, videoInterviewEnabled, started])
 
   const replayQuestion = async () => {
     const q = questionsRef.current[currentIndexRef.current]
@@ -683,7 +713,7 @@ export default function Interview() {
       </div>
 
       {/* Question card */}
-      <div className="card p-6 mb-6">
+      <div className="card p-6 mb-6 relative">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             {isSpeaking && (
@@ -727,6 +757,26 @@ export default function Interview() {
         <p className="text-base sm:text-lg font-medium text-slate-800 leading-relaxed">{q.question}</p>
         {isSpeaking && (
           <p className="text-xs text-slate-400 mt-3 italic">Recording starts automatically when the question finishes…</p>
+        )}
+
+        {/* Recruiter video bubble — circular, bottom-right, visible while speaking */}
+        {videoInterviewEnabled && q?.video_url && isSpeaking && (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            style={{
+              position: 'absolute',
+              bottom: 16,
+              right: 16,
+              width: 80,
+              height: 80,
+              borderRadius: 9999,
+              objectFit: 'cover',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+              pointerEvents: 'none',
+            }}
+          />
         )}
 
         {/* Tab bar — always shown */}
@@ -801,6 +851,7 @@ export default function Interview() {
             </Suspense>
           </div>
         )}
+
       </div>
 
       {/* Transcribing status — shown briefly between questions while Whisper processes */}

@@ -3,6 +3,7 @@ from datetime import datetime
 
 DB_PATH = os.getenv("DB_PATH", "./interview.db")
 AUDIO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "audio")
+VIDEO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "video")
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
@@ -11,6 +12,7 @@ def get_conn():
 
 def init_db():
     os.makedirs(AUDIO_DIR, exist_ok=True)
+    os.makedirs(VIDEO_DIR, exist_ok=True)
 
     conn = get_conn()
 
@@ -44,6 +46,12 @@ def init_db():
     except Exception:
         pass  # Column already exists
 
+    # Add video_interview_enabled column to sessions
+    try:
+        conn.execute("ALTER TABLE sessions ADD COLUMN video_interview_enabled INTEGER DEFAULT 0")
+    except Exception:
+        pass  # Column already exists
+
     # Settings
     conn.execute("""
         CREATE TABLE IF NOT EXISTS settings (
@@ -68,6 +76,12 @@ def init_db():
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_questions_domain ON questions(domain, difficulty)")
 
+    # Add video_path column to questions
+    try:
+        conn.execute("ALTER TABLE questions ADD COLUMN video_path TEXT")
+    except Exception:
+        pass  # Column already exists
+
     # Job setup state — tracks background question/audio generation per job
     conn.execute("""
         CREATE TABLE IF NOT EXISTS job_setup (
@@ -85,6 +99,12 @@ def init_db():
             updated_at TEXT
         )
     """)
+
+    # Add video_interview_enabled column to job_setup
+    try:
+        conn.execute("ALTER TABLE job_setup ADD COLUMN video_interview_enabled INTEGER DEFAULT 0")
+    except Exception:
+        pass  # Column already exists
 
     # Seed default evaluation prompt
     existing = conn.execute("SELECT key FROM settings WHERE key = 'evaluation_prompt'").fetchone()

@@ -4,8 +4,9 @@ from pydantic import BaseModel
 from typing import Optional
 import uuid, json, os, httpx, io, math, random, tempfile
 from datetime import datetime
-from .database import get_conn, AUDIO_DIR
+from .database import get_conn, AUDIO_DIR, VIDEO_DIR
 from . import claude_client as ai
+from . import video_client as vc
 from openai import OpenAI
 
 TALENTBRIDGE_API_URL = os.getenv("TALENTBRIDGE_API_URL", "http://localhost:8000")
@@ -135,7 +136,28 @@ def get_job_setup_status(job_id: int):
         "progress_current": row["progress_current"],
         "progress_total": row["progress_total"],
         "domain": row["domain"],
+        "video_interview_enabled": bool(row["video_interview_enabled"]) if "video_interview_enabled" in row.keys() else False,
     }
+
+
+class VideoModeRequest(BaseModel):
+    enabled: bool
+
+@job_setup_router.put("/job/{job_id}/video-mode")
+def toggle_video_mode(job_id: int, req: VideoModeRequest):
+    """Enable or disable video interview mode for a job."""
+    conn = get_conn()
+    row = conn.execute("SELECT job_id FROM job_setup WHERE job_id=?", (job_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Job setup not found")
+    conn.execute(
+        "UPDATE job_setup SET video_interview_enabled=?, updated_at=? WHERE job_id=?",
+        (1 if req.enabled else 0, datetime.utcnow().isoformat(), job_id)
+    )
+    conn.commit()
+    conn.close()
+    return {"job_id": job_id, "video_interview_enabled": req.enabled}
 
 
 def _run_job_setup(job_id: int, req: JobSetupRequest):
@@ -165,12 +187,20 @@ def _run_job_setup(job_id: int, req: JobSetupRequest):
                     audio_path,
                 )
 
+                # Generate talking-head video (best-effort — never blocks job setup)
+                video_provider = vc.get_provider()
+                video_result = video_provider.generate_talking_head(
+                    audio_path=audio_path,
+                    text=q.get("voice_text") or q["question"],
+                )
+                video_filename_stored = os.path.basename(video_result) if video_result else None
+
                 conn = get_conn()
                 conn.execute(
-                    "INSERT OR IGNORE INTO questions (id, domain, difficulty, question, voice_text, topic, audio_path, created_at) "
-                    "VALUES (?,?,?,?,?,?,?,?)",
+                    "INSERT OR IGNORE INTO questions (id, domain, difficulty, question, voice_text, topic, audio_path, video_path, created_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?)",
                     (q_id, req.domain, req.difficulty, q["question"], q.get("voice_text", ""),
-                     q.get("topic", ""), audio_filename if tts_ok else None, datetime.utcnow().isoformat())
+                     q.get("topic", ""), audio_filename if tts_ok else None, video_filename_stored, datetime.utcnow().isoformat())
                 )
                 selected_ids.append(q_id)
                 conn.execute(
@@ -333,6 +363,7 @@ def create_session(req: SessionCreate):
                    "Wait for setup to complete before starting a session."
         )
 
+    video_interview_enabled = bool(setup["video_interview_enabled"]) if "video_interview_enabled" in setup.keys() else False
     question_ids = json.loads(setup["question_ids"] or "[]")
     num_behavioral = math.ceil(req.num_questions * req.behavioral_pct / 100)
     num_technical = req.num_questions - num_behavioral
@@ -346,6 +377,7 @@ def create_session(req: SessionCreate):
             q = dict(row)
             q["type"] = "technical"
             q["audio_url"] = f"/audio/{q['audio_path']}" if q.get("audio_path") else None
+            q["video_url"] = f"/video/{q['video_path']}" if q.get("video_path") else None
             technical_qs.append(q)
     conn.close()
 
@@ -379,15 +411,16 @@ def create_session(req: SessionCreate):
     conn = get_conn()
     conn.execute(
         "INSERT INTO sessions (id, job_description, resume_text, difficulty, seniority_bar, "
-        "time_limit, questions, answers, status, verify_coding_ability, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        "time_limit, questions, answers, status, verify_coding_ability, video_interview_enabled, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (session_id, req.job_description, req.resume_text, req.difficulty, req.seniority_bar,
          req.time_limit, json.dumps(questions), "{}", "active", 1 if req.verify_coding_ability else 0,
-         datetime.utcnow().isoformat())
+         1 if video_interview_enabled else 0, datetime.utcnow().isoformat())
     )
     conn.commit()
     conn.close()
     return {"session_id": session_id, "questions": questions, "time_limit": req.time_limit,
-            "verify_coding_ability": req.verify_coding_ability}
+            "verify_coding_ability": req.verify_coding_ability,
+            "video_interview_enabled": video_interview_enabled}
 
 
 @session_router.get("/session/{session_id}")
@@ -406,6 +439,7 @@ def get_session(session_id: str):
         "seniority_bar": row["seniority_bar"],
         "report": json.loads(row["report"]) if row["report"] else None,
         "verify_coding_ability": bool(row["verify_coding_ability"]) if "verify_coding_ability" in row.keys() else False,
+        "video_interview_enabled": bool(row["video_interview_enabled"]) if "video_interview_enabled" in row.keys() else False,
         "draw_answers": json.loads(row["draw_answers"]) if "draw_answers" in row.keys() and row["draw_answers"] else None,
     }
 

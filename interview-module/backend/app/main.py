@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
-from .database import init_db, AUDIO_DIR
+from .database import init_db, AUDIO_DIR, VIDEO_DIR
 from .routers import (
     questions_router, question_bank_router, job_setup_router,
     evaluate_router, report_router, session_router,
@@ -28,6 +28,10 @@ app.add_middleware(
 # Serve generated audio files as static assets
 os.makedirs(AUDIO_DIR, exist_ok=True)
 app.mount("/audio", StaticFiles(directory=AUDIO_DIR), name="audio")
+
+# Serve generated video files as static assets
+os.makedirs(VIDEO_DIR, exist_ok=True)
+app.mount("/video", StaticFiles(directory=VIDEO_DIR), name="video")
 
 app.include_router(questions_router)
 app.include_router(question_bank_router)
