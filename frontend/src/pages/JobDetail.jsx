@@ -687,7 +687,6 @@ export default function JobDetail() {
 
   // Video interview mode
   const [videoModeEnabled, setVideoModeEnabled] = useState(false);
-  const [videoModeLoading, setVideoModeLoading] = useState(false);
   const [jobQuestions, setJobQuestions] = useState([]);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
   const INTERVIEW_API = import.meta.env.VITE_INTERVIEW_API_URL || 'http://localhost:8001';
@@ -708,18 +707,8 @@ export default function JobDetail() {
     load();
   }, [setupStatus, id, INTERVIEW_API]);
 
-  const toggleVideoMode = async () => {
-    setVideoModeLoading(true);
-    try {
-      const newVal = !videoModeEnabled;
-      await axios.put(`${INTERVIEW_API}/api/interview/job/${id}/video-mode`, { enabled: newVal });
-      setVideoModeEnabled(newVal);
-    } catch (err) {
-      console.error('Failed to toggle video mode', err);
-    } finally {
-      setVideoModeLoading(false);
-    }
-  };
+  // Toggle is local-only — persisted + video generation triggered on Save Config
+  const toggleVideoMode = () => setVideoModeEnabled(v => !v);
 
   const handleBulkInvite = async () => {
     setBulkLoading(true);
@@ -838,6 +827,15 @@ Experience: 5 years of relevant industry experience.`;
         interview_behavioral_pct: screeningConfig.behavioral_pct,
         verify_coding_ability: screeningConfig.verify_coding_ability ?? false,
       });
+
+      // Persist video mode toggle
+      await axios.put(`${INTERVIEW_API}/api/interview/job/${job.id}/video-mode`, { enabled: videoModeEnabled });
+
+      // If video mode just turned on, trigger D-ID video generation for existing questions
+      if (videoModeEnabled) {
+        await axios.post(`${INTERVIEW_API}/api/interview/job/${job.id}/generate-videos`);
+      }
+
       setConfigSaved(true);
       setTimeout(() => setConfigSaved(false), 2000);
       // Screening config change triggers re-generation — start polling
@@ -1097,11 +1095,11 @@ Experience: 5 years of relevant industry experience.`;
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-sm font-medium text-slate-700">Video Interview</span>
-                  <p className="text-xs text-slate-500 mt-0.5">Show a recruiter avatar speaking each question during the interview.</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Show a recruiter avatar speaking each question. Videos are generated when you save with this enabled.</p>
                 </div>
                 <button
                   onClick={toggleVideoMode}
-                  disabled={videoModeLoading || setupStatus !== 'ready'}
+                  disabled={setupStatus !== 'ready'}
                   className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50 ${
                     videoModeEnabled ? 'bg-indigo-600' : 'bg-slate-200'
                   }`}

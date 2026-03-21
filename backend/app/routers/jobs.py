@@ -51,6 +51,7 @@ def _trigger_job_setup(job: models.Job, selected_question_ids: list = None):
                 "seniority": job.interview_seniority or "mid",
                 "num_technical": max(1, num_technical),
                 "selected_question_ids": selected_question_ids or [],
+                "generate_video": False,  # Videos generated on-demand when user enables Video Interview
             },
             timeout=5.0,
         )

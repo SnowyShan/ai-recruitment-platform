@@ -95,6 +95,7 @@ class JobSetupRequest(BaseModel):
     seniority: str = "mid"
     num_technical: int = 7
     selected_question_ids: list[str] = []  # Pre-selected from question bank
+    generate_video: bool = False  # Off by default — only generate D-ID videos when explicitly requested
 
 @job_setup_router.post("/job/{job_id}/setup", status_code=202)
 def setup_job(job_id: int, req: JobSetupRequest, background_tasks: BackgroundTasks):
@@ -160,6 +161,51 @@ def toggle_video_mode(job_id: int, req: VideoModeRequest):
     return {"job_id": job_id, "video_interview_enabled": req.enabled}
 
 
+@job_setup_router.post("/job/{job_id}/generate-videos", status_code=202)
+def generate_videos_for_job(job_id: int, background_tasks: BackgroundTasks):
+    """Trigger background D-ID video generation for all questions on a job that don't have videos yet."""
+    conn = get_conn()
+    row = conn.execute("SELECT question_ids FROM job_setup WHERE job_id=?", (job_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Job setup not found")
+    question_ids = json.loads(row["question_ids"] or "[]")
+    conn.close()
+    background_tasks.add_task(_generate_videos_bg, job_id=job_id, question_ids=question_ids)
+    return {"status": "generating_videos", "job_id": job_id, "num_questions": len(question_ids)}
+
+
+def _generate_videos_bg(job_id: int, question_ids: list):
+    """Background task: generate D-ID videos for questions that don't have one yet."""
+    print(f"[VIDEO GEN] Job {job_id}: generating videos for {len(question_ids)} questions")
+    video_provider = vc.get_provider()
+    for q_id in question_ids:
+        conn = get_conn()
+        row = conn.execute("SELECT question, voice_text, video_path, audio_path FROM questions WHERE id=?", (q_id,)).fetchone()
+        conn.close()
+        if not row:
+            continue
+        if row["video_path"]:
+            print(f"[VIDEO GEN] Question {q_id} already has video, skipping")
+            continue
+        text = row["voice_text"] or row["question"]
+        audio_path = os.path.join(AUDIO_DIR, row["audio_path"]) if row["audio_path"] else None
+        try:
+            video_result = video_provider.generate_talking_head(audio_path=audio_path, text=text)
+            if video_result:
+                video_filename = os.path.basename(video_result)
+                conn = get_conn()
+                conn.execute("UPDATE questions SET video_path=? WHERE id=?", (video_filename, q_id))
+                conn.commit()
+                conn.close()
+                print(f"[VIDEO GEN] Question {q_id} → {video_filename}")
+            else:
+                print(f"[VIDEO GEN] Question {q_id}: video generation returned None")
+        except Exception as e:
+            print(f"[VIDEO GEN] Question {q_id} failed: {e}")
+    print(f"[VIDEO GEN] Job {job_id}: done")
+
+
 def _run_job_setup(job_id: int, req: JobSetupRequest):
     """Background task: generate technical questions + TTS audio for a job."""
     try:
@@ -187,13 +233,15 @@ def _run_job_setup(job_id: int, req: JobSetupRequest):
                     audio_path,
                 )
 
-                # Generate talking-head video (best-effort — never blocks job setup)
-                video_provider = vc.get_provider()
-                video_result = video_provider.generate_talking_head(
-                    audio_path=audio_path,
-                    text=q.get("voice_text") or q["question"],
-                )
-                video_filename_stored = os.path.basename(video_result) if video_result else None
+                # Generate talking-head video only if explicitly requested
+                video_filename_stored = None
+                if req.generate_video:
+                    video_provider = vc.get_provider()
+                    video_result = video_provider.generate_talking_head(
+                        audio_path=audio_path,
+                        text=q.get("voice_text") or q["question"],
+                    )
+                    video_filename_stored = os.path.basename(video_result) if video_result else None
 
                 conn = get_conn()
                 conn.execute(
