@@ -221,7 +221,9 @@ def _run_job_setup(job_id: int, req: JobSetupRequest):
         print(f"[JOB SETUP] Job {job_id} ready — {len(selected_ids)} technical questions")
 
     except Exception as e:
+        import traceback
         print(f"[JOB SETUP] Job {job_id} failed: {e}")
+        print(f"[JOB SETUP] Traceback:\n{traceback.format_exc()}")
         conn = get_conn()
         conn.execute("UPDATE job_setup SET status='failed', updated_at=? WHERE job_id=?",
                      (datetime.utcnow().isoformat(), job_id))

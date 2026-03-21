@@ -3,7 +3,9 @@ import { useParams, useLocation, useNavigate, useSearchParams } from 'react-rout
 import axios from 'axios'
 
 const ExcalidrawWrapper = lazy(() =>
-  import('@excalidraw/excalidraw').then(mod => ({ default: mod.Excalidraw }))
+  import('@excalidraw/excalidraw')
+    .then(mod => ({ default: mod.Excalidraw }))
+    .catch(() => ({ default: () => <div className="flex items-center justify-center h-full text-slate-400 text-sm">Canvas unavailable on this device</div> }))
 )
 
 // ── TTS helpers ───────────────────────────────────────────────────────────────
@@ -604,8 +606,9 @@ export default function Interview() {
   )
 
   if (!tokenChecked) return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-4">
       <div className="spinner" />
+      <p className="text-sm text-slate-400">Loading interview…</p>
     </div>
   )
 

@@ -13,7 +13,7 @@ log = logging.getLogger(__name__)
 
 DID_API_BASE = "https://api.d-id.com"
 DID_DEFAULT_PRESENTER = (
-    "https://create-images-results.d-id.com/DefaultPresenters/Noelle_f/image.jpeg"
+    "https://clips-presenters.d-id.com/v2/Amber/0zSz8kflCN/OUM7xZOuD5/image.png"
 )
 POLL_INTERVAL = 3       # seconds
 POLL_TIMEOUT = 90       # seconds
@@ -39,7 +39,8 @@ class DIDProvider(VideoProvider):
 
     def __init__(self, api_key: str):
         # D-ID uses Basic auth: base64("key:")
-        self._auth = "Basic " + base64.b64encode(f"{api_key}:".encode()).decode()
+        # D-ID API keys are already base64-encoded; use directly as Basic auth value
+        self._auth = "Basic " + api_key
         self._presenter = os.getenv("DID_PRESENTER_URL", DID_DEFAULT_PRESENTER)
 
     def generate_talking_head(self, audio_path: str, text: str) -> str | None:
