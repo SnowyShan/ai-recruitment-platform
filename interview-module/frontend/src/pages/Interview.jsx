@@ -116,6 +116,15 @@ export default function Interview() {
     }
   }, [sessionId])
 
+  // Pre-interview intro phase:
+  //   'intro'    → instructions screen, mic not yet requested
+  //   'granting' → getUserMedia in flight, spinner on button
+  //   'ready'    → mic granted/denied, "Start Interview" button shown, Q0 audio pre-fetching
+  //   'started'  → interview running
+  const [introPhase, setIntroPhase] = useState('intro')
+  const micReady  = introPhase === 'started'
+  const started   = introPhase === 'started'
+
   // Update recruiter video bubble when question changes
   useEffect(() => {
     if (!videoInterviewEnabled || !started) return
@@ -130,18 +139,8 @@ export default function Interview() {
       vid.load()
     }
   }, [currentIndex, questions, videoInterviewEnabled, started])
-
-  // Pre-interview intro phase:
-  //   'intro'    → instructions screen, mic not yet requested
-  //   'granting' → getUserMedia in flight, spinner on button
-  //   'ready'    → mic granted/denied, "Start Interview" button shown, Q0 audio pre-fetching
-  //   'started'  → interview running
-  const [introPhase, setIntroPhase] = useState('intro')
   // Map of question index → pre-fetched blob URL (all questions fetched in parallel during 'ready' phase)
   const prefetchedAudioMapRef = useRef({})
-
-  const micReady  = introPhase === 'started'
-  const started   = introPhase === 'started'
 
   const handleGrantMic = async () => {
     setIntroPhase('granting')
