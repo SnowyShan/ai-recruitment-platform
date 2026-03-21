@@ -828,11 +828,12 @@ Experience: 5 years of relevant industry experience.`;
         verify_coding_ability: screeningConfig.verify_coding_ability ?? false,
       });
 
-      // Persist video mode toggle
+      // Persist video mode toggle to interview module
       await axios.put(`${INTERVIEW_API}/api/interview/job/${job.id}/video-mode`, { enabled: videoModeEnabled });
 
-      // If video mode just turned on, trigger D-ID video generation for existing questions
+      // If video mode changed, trigger re-setup with the new video flag so videos get generated (or not)
       if (videoModeEnabled) {
+        // Video turned ON — generate videos for existing questions
         await axios.post(`${INTERVIEW_API}/api/interview/job/${job.id}/generate-videos`);
       }
 

@@ -103,19 +103,22 @@ def setup_job(job_id: int, req: JobSetupRequest, background_tasks: BackgroundTas
     conn = get_conn()
     existing = conn.execute("SELECT job_id FROM job_setup WHERE job_id=?", (job_id,)).fetchone()
     now = datetime.utcnow().isoformat()
+    video_enabled_int = 1 if req.generate_video else 0
     if existing:
         conn.execute(
             "UPDATE job_setup SET domain=?, difficulty=?, seniority=?, num_technical=?, "
-            "status='generating', progress_current=0, progress_total=?, question_ids='[]', updated_at=? "
-            "WHERE job_id=?",
-            (req.domain, req.difficulty, req.seniority, req.num_technical, req.num_technical, now, job_id)
+            "status='generating', progress_current=0, progress_total=?, question_ids='[]', "
+            "video_interview_enabled=?, updated_at=? WHERE job_id=?",
+            (req.domain, req.difficulty, req.seniority, req.num_technical, req.num_technical,
+             video_enabled_int, now, job_id)
         )
     else:
         conn.execute(
             "INSERT INTO job_setup (job_id, domain, difficulty, seniority, num_technical, num_behavioral, "
-            "status, progress_current, progress_total, question_ids, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,0,'generating',0,?,?,?,?)",
-            (job_id, req.domain, req.difficulty, req.seniority, req.num_technical, req.num_technical, '[]', now, now)
+            "status, progress_current, progress_total, question_ids, video_interview_enabled, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,0,'generating',0,?,?,?,?,?)",
+            (job_id, req.domain, req.difficulty, req.seniority, req.num_technical, req.num_technical,
+             '[]', video_enabled_int, now, now)
         )
     conn.commit()
     conn.close()

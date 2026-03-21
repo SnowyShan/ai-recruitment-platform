@@ -33,7 +33,7 @@ def _infer_domain(job_title: str) -> str:
     return 'general'
 
 
-def _trigger_job_setup(job: models.Job, selected_question_ids: list = None):
+def _trigger_job_setup(job: models.Job, selected_question_ids: list = None, generate_video: bool = False):
     """Call interview module to (re)generate technical questions + audio for a job."""
     num_q = job.interview_num_questions or 8
     behavioral_pct = job.interview_behavioral_pct or 20
@@ -51,7 +51,7 @@ def _trigger_job_setup(job: models.Job, selected_question_ids: list = None):
                 "seniority": job.interview_seniority or "mid",
                 "num_technical": max(1, num_technical),
                 "selected_question_ids": selected_question_ids or [],
-                "generate_video": False,  # Videos generated on-demand when user enables Video Interview
+                "generate_video": generate_video,
             },
             timeout=5.0,
         )
@@ -71,6 +71,7 @@ async def create_job(
     # Pop fields that aren't on the Job model
     data = job_data.model_dump()
     selected_question_ids = data.pop("selected_question_ids", []) or []
+    generate_video = data.get("video_interview_enabled", False)
 
     # Infer domain from job title
     domain = _infer_domain(data.get("title", ""))
@@ -86,8 +87,8 @@ async def create_job(
     db.commit()
     db.refresh(new_job)
 
-    # Trigger background question + audio generation
-    _trigger_job_setup(new_job, selected_question_ids)
+    # Trigger background question + audio (+ optionally video) generation
+    _trigger_job_setup(new_job, selected_question_ids, generate_video=generate_video)
 
     log_activity(db, current_user.id, "job_created", "job", new_job.id, json.dumps({"title": new_job.title}))
     return new_job

@@ -231,6 +231,7 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
     salary_min: '', salary_max: '', description: '', requirements: '', skills_required: '',
     interview_behavioral_pct: 20,
     verify_coding_ability: false,
+    video_interview_enabled: false,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -309,6 +310,7 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
         salary_max: formData.salary_max ? parseInt(formData.salary_max) : null,
         interview_behavioral_pct: parseInt(formData.interview_behavioral_pct) || 20,
         verify_coding_ability: !!formData.verify_coding_ability,
+        video_interview_enabled: !!formData.video_interview_enabled,
         selected_question_ids: selectedQIds,
       };
       await jobsAPI.create(data);
@@ -423,6 +425,20 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
                   <div>
                     <span className="text-sm font-medium text-slate-700">Verify coding ability</span>
                     <p className="text-xs text-slate-500 mt-0.5">Adds a logic-based coding question to the interview. Candidate can type their solution.</p>
+                  </div>
+                </label>
+
+                {/* Video Interview */}
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.video_interview_enabled}
+                    onChange={e => setFormData(prev => ({ ...prev, video_interview_enabled: e.target.checked }))}
+                    className="mt-0.5 accent-primary-600"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-slate-700">Video Interview</span>
+                    <p className="text-xs text-slate-500 mt-0.5">Generate a recruiter avatar video for each question (D-ID). Takes longer to set up but creates a more engaging experience.</p>
                   </div>
                 </label>
 

@@ -83,7 +83,8 @@ class Job(Base):
     interview_seniority       = Column(String(20), default="mid")
     interview_behavioral_pct  = Column(Integer, default=20)   # % of questions that are behavioral
 
-    verify_coding_ability = Column(Boolean, default=False)
+    verify_coding_ability   = Column(Boolean, default=False)
+    video_interview_enabled = Column(Boolean, default=False)
 
     # Question-bank setup state (managed by interview module background tasks)
     domain        = Column(String(50), nullable=True)   # inferred from job title
