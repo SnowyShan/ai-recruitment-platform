@@ -680,6 +680,11 @@ export default function JobDetail() {
   const [configSaved, setConfigSaved] = useState(false);
   const [launchingMock, setLaunchingMock] = useState(false);
 
+  // Setup status polling
+  const [setupStatus, setSetupStatus] = useState(null); // null | 'generating' | 'ready' | 'failed'
+  const [setupProgress, setSetupProgress] = useState({ current: 0, total: 0 });
+  const setupPollRef = useRef(null);
+
   // Video interview mode
   const [videoModeEnabled, setVideoModeEnabled] = useState(false);
   const [videoModeLoading, setVideoModeLoading] = useState(false);
@@ -715,11 +720,6 @@ export default function JobDetail() {
       setVideoModeLoading(false);
     }
   };
-
-  // Setup status polling
-  const [setupStatus, setSetupStatus] = useState(null); // null | 'generating' | 'ready' | 'failed'
-  const [setupProgress, setSetupProgress] = useState({ current: 0, total: 0 });
-  const setupPollRef = useRef(null);
 
   const handleBulkInvite = async () => {
     setBulkLoading(true);
