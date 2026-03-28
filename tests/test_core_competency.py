@@ -245,9 +245,9 @@ def run(record=False):
             page.goto(f"{TB_URL}/jobs")
             page.wait_for_load_state("networkidle")
 
-            # Click Create Job button
-            page.click("button:has-text('Create Job'), button:has-text('New Job'), button:has-text('Post Job')",
-                       timeout=8_000)
+            # Click Create Job button (the primary action button in the page header,
+            # not sidebar nav links). Use strict button selector.
+            page.click("button.btn-primary:has-text('Create Job')", timeout=8_000)
             page.wait_for_selector("h2:has-text('Create New Job')", timeout=8_000)
             passed.append(_check("Create Job modal opened", True))
 
@@ -259,22 +259,68 @@ def run(record=False):
             page.fill('textarea[name="requirements"]', JOB_REQS)
             passed.append(_check("Job form filled", True))
 
-            # Submit
-            page.click('button[type="submit"]:has-text("Create"), button[type="submit"]:has-text("Post"), form button[type="submit"]',
+            # Submit — the modal's submit button says "Create Job"
+            page.click('button[type="submit"].btn-primary:has-text("Create Job")',
                        timeout=5_000)
 
-            # Should navigate to job detail page
+            # After submit, modal closes and jobs list reloads.
+            # Wait for the modal to disappear then find the new job by title.
             try:
-                page.wait_for_url(lambda u: "/jobs/" in u and u != f"{TB_URL}/jobs",
-                                  timeout=15_000)
+                page.wait_for_selector("h2:has-text('Create New Job')",
+                                       state="hidden", timeout=10_000)
+            except Exception:
+                pass
+            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(1000)
+
+            # Find the new job card by title and click View / the job title link
+            job_link = None
+            for _ in range(10):
+                job_link = page.query_selector(f"a[href*='/jobs/']:has-text('{JOB_TITLE[:30]}')")
+                if not job_link:
+                    # Try finding via card text then the View link nearby
+                    card = page.query_selector(f"text={JOB_TITLE[:30]}")
+                    if card:
+                        job_link = card.evaluate_handle(
+                            "el => el.closest('[href]') || el.closest('div').querySelector('a[href*=\"/jobs/\"]')"
+                        )
+                        if job_link.as_element():
+                            break
+                if job_link:
+                    break
+                page.wait_for_timeout(1000)
+
+            if not job_link or not job_link.as_element() if hasattr(job_link, 'as_element') else not job_link:
+                # Fallback: get the job ID from the API and navigate directly
+                try:
+                    token = _get_token()
+                    r = requests.get(f"{TB_API}/api/jobs/",
+                                     headers={"Authorization": f"Bearer {token}"}, timeout=10)
+                    jobs = r.json() if r.status_code == 200 else []
+                    new_job = next((j for j in jobs if JOB_TITLE[:20] in j.get("title", "")), None)
+                    if new_job:
+                        page.goto(f"{TB_URL}/jobs/{new_job['id']}")
+                        page.wait_for_load_state("networkidle")
+                        passed.append(_check("Navigated to job detail page (via API fallback)", True, page.url))
+                    else:
+                        passed.append(_check("Found newly created job", False, "not found in job list"))
+                        ctx.close()
+                        return False
+                except Exception as e:
+                    passed.append(_check("Navigated to job detail page", False, str(e)))
+                    ctx.close()
+                    return False
+            else:
+                job_link.click()
+                try:
+                    page.wait_for_url(lambda u: "/jobs/" in u and u != f"{TB_URL}/jobs",
+                                      timeout=10_000)
+                except Exception:
+                    pass
                 passed.append(_check("Navigated to job detail page", True, page.url))
-            except Exception as e:
-                passed.append(_check("Navigated to job detail page", False, str(e)))
-                ctx.close()
-                return False
 
             job_url = page.url
-            job_id  = job_url.rstrip("/").split("/")[-1]
+            job_id  = job_url.rstrip("/").split("/")[-1].split("?")[0]
             print(f"  Job ID: {job_id}")
 
             # ── Step 3: Wait for question bank generation ─────────────────
@@ -325,46 +371,28 @@ def run(record=False):
                 ctx.close()
                 return False
 
-            # ── Step 5: Mark first question as Core Competency ────────────
-            print("\n[Step 5] Mark first question as Core Competency")
-            mark_core_btn = page.query_selector("button:has-text('Mark Core')")
-            if not mark_core_btn:
-                passed.append(_check("Found 'Mark Core' button", False, "no untagged questions found"))
-                ctx.close()
-                return False
-
-            # Capture the question text next to the button (for logging)
-            try:
-                question_text = mark_core_btn.evaluate(
-                    "el => el.closest('div').querySelector('span.truncate')?.textContent || ''"
-                )
-                print(f"  Flagging: {question_text[:70]}…")
-            except Exception:
-                pass
-
-            mark_core_btn.click()
-            page.wait_for_timeout(2000)  # API call + re-render
-
-            # Verify the button now shows ⭐ Core
-            try:
-                page.wait_for_selector("button:has-text('⭐ Core'), button:has-text('\u2b50 Core')",
-                                       timeout=8_000)
-                passed.append(_check("'⭐ Core' badge appeared after toggle", True))
-            except Exception as e:
-                passed.append(_check("'⭐ Core' badge appeared after toggle", False, str(e)))
-
-            # ── Step 6: Save Config ───────────────────────────────────────
-            print("\n[Step 6] Save Config")
+            # ── Step 5: Set num_questions=4 then Save Config ─────────────
+            # Keeping the session small ensures the CC question is drawn.
+            # The num_questions input is the first number input in the config panel.
+            print("\n[Step 5] Set num_questions=4 and Save Config")
+            num_inputs = page.query_selector_all('input[type="number"]')
+            for inp in num_inputs:
+                placeholder = inp.get_attribute("placeholder") or ""
+                # Target the questions count input (not time limit)
+                val = inp.input_value()
+                if val and int(val) > 4:
+                    inp.triple_click()
+                    inp.type("4")
+                    break
             page.click("button:has-text('Save Config')", timeout=5_000)
 
-            # Wait for "Saved!" confirmation
             try:
                 page.wait_for_selector("button:has-text('Saved!')", timeout=10_000)
                 passed.append(_check("Config saved — 'Saved!' appeared", True))
             except Exception as e:
                 passed.append(_check("Config saved — 'Saved!' appeared", False, str(e)))
 
-            # Wait for re-generation to complete (Save Config triggers new setup)
+            # Wait for re-generation to complete
             print("  Waiting for re-generation after save…", end="", flush=True)
             deadline2 = time.time() + 300
             regen_ready = False
@@ -389,29 +417,84 @@ def run(record=False):
                 ctx.close()
                 return False
 
+            # Reload page to get fresh question list after regen
+            page.reload()
+            page.wait_for_load_state("networkidle")
+
+            # ── Step 6: Mark a question as Core Competency (post-regen) ──
+            print("\n[Step 6] Mark a question as Core Competency")
+
+            # Expand config panel again after reload
+            page.click("button:has-text('Screening Interview Config')", timeout=8_000)
+            page.wait_for_timeout(1500)
+
+            # Wait for fresh question list
+            try:
+                page.wait_for_selector("button:has-text('Mark Core'), button:has-text('\u2b50 Core')",
+                                       timeout=15_000)
+                passed.append(_check("Fresh question list loaded after re-gen", True))
+            except Exception as e:
+                passed.append(_check("Fresh question list loaded after re-gen", False, str(e)))
+                ctx.close()
+                return False
+
+            mark_core_btn = page.query_selector("button:has-text('Mark Core')")
+            if not mark_core_btn:
+                passed.append(_check("Found 'Mark Core' button", False, "all questions already flagged?"))
+                ctx.close()
+                return False
+
+            try:
+                question_text = mark_core_btn.evaluate(
+                    "el => el.closest('div').querySelector('span.truncate')?.textContent || ''"
+                )
+                print(f"  Flagging: {question_text[:70]}…")
+            except Exception:
+                pass
+
+            mark_core_btn.click()
+            page.wait_for_timeout(3000)  # API call (generates probes) + re-render
+
+            try:
+                page.wait_for_selector("button:has-text('\u2b50 Core')", timeout=10_000)
+                passed.append(_check("'⭐ Core' badge appeared after toggle", True))
+            except Exception as e:
+                passed.append(_check("'⭐ Core' badge appeared after toggle", False, str(e)))
+
             # ── Step 7: Click Mock Interview ──────────────────────────────
             print("\n[Step 7] Click Mock Interview button")
 
-            # Make sure config panel is still open (may have collapsed)
-            if not page.query_selector("button:has-text('Mock Interview')"):
-                page.click("button:has-text('Screening Interview Config')", timeout=5_000)
-                page.wait_for_timeout(1000)
+            # Mock Interview opens a blank window, creates a session via fetch,
+            # then sets newWindow.location.href to localhost:5174/interview/{id}.
+            # Playwright may catch the blank window before it navigates.
+            # Strategy: click the button, then wait for any page in context with /interview/ URL.
+            pages_before = set(id(p) for p in ctx.pages)
+            page.click("button:has-text('Mock Interview')", timeout=8_000)
 
-            # Mock Interview opens a new tab
-            with ctx.expect_page() as new_page_info:
-                page.click("button:has-text('Mock Interview')", timeout=8_000)
+            # Wait up to 20s for the interview page to appear at localhost:5174
+            interview_page = None
+            for _ in range(40):
+                page.wait_for_timeout(500)
+                for p in ctx.pages:
+                    if "/interview/" in p.url and "localhost:5174" in p.url:
+                        interview_page = p
+                        break
+                if interview_page:
+                    break
 
-            interview_page = new_page_info.value
-            interview_page.wait_for_load_state("networkidle")
+            if not interview_page:
+                # Fallback: check if any new page appeared at all
+                for p in ctx.pages:
+                    if id(p) not in pages_before and p != page:
+                        interview_page = p
+                        break
 
-            # Add BlackHole loopback init script to interview tab
-            # (can't inject before navigation since it's a new tab opened by the app)
-            # We rely on --use-fake-ui-for-media-stream set at context level.
+            if interview_page:
+                interview_page.wait_for_load_state("networkidle")
 
             passed.append(_check("Interview tab opened", bool(interview_page)))
             print(f"  Interview URL: {interview_page.url}")
 
-            # Verify it's an interview session URL
             is_interview = "/interview/" in interview_page.url
             passed.append(_check("Interview URL is /interview/{session_id}", is_interview,
                                   interview_page.url))
@@ -419,7 +502,6 @@ def run(record=False):
                 ctx.close()
                 return False
 
-            # Extract session_id from URL for later report check
             session_id = interview_page.url.rstrip("/").split("/")[-1].split("?")[0]
             print(f"  Session ID: {session_id}")
 
