@@ -710,6 +710,21 @@ export default function JobDetail() {
   // Toggle is local-only — persisted + video generation triggered on Save Config
   const toggleVideoMode = () => setVideoModeEnabled(v => !v);
 
+  const toggleCoreCompetency = async (questionId, currentlyEnabled) => {
+    const jd = [job?.description, job?.requirements, job?.responsibilities].filter(Boolean).join('\n\n') || job?.title || '';
+    try {
+      await axios.put(`${INTERVIEW_API}/api/interview/question/${questionId}/core-competency`, {
+        enabled: !currentlyEnabled,
+        job_description: jd,
+      });
+      // Refresh question list
+      const res = await axios.get(`${INTERVIEW_API}/api/interview/question-bank`, { params: { domain: 'all', limit: 50 } });
+      setJobQuestions(res.data.questions || []);
+    } catch (e) {
+      console.error('Failed to toggle core competency', e);
+    }
+  };
+
   const handleBulkInvite = async () => {
     setBulkLoading(true);
     try {
@@ -1090,6 +1105,34 @@ Experience: 5 years of relevant industry experience.`;
                 </div>
               </label>
             </div>
+
+            {/* Core competency questions */}
+            {jobQuestions.length > 0 && (
+              <div className="sm:col-span-2">
+                <label className="text-sm font-medium text-slate-700 mb-2 block">Interview Questions</label>
+                <p className="text-xs text-slate-500 mb-2">Flag questions as core competency to add follow-up probes that verify depth of understanding.</p>
+                <div className="space-y-1 max-h-56 overflow-y-auto border border-slate-200 rounded-lg p-2">
+                  {jobQuestions.map(q => {
+                    const isCore = !!q.is_core_competency;
+                    return (
+                      <div key={q.id} className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-slate-50 text-xs text-slate-600">
+                        <button
+                          onClick={() => toggleCoreCompetency(q.id, isCore)}
+                          className={`flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold border transition-colors ${
+                            isCore
+                              ? 'bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-200'
+                              : 'bg-slate-50 text-slate-400 border-slate-200 hover:border-amber-300 hover:text-amber-600'
+                          }`}
+                        >
+                          {isCore ? '\u2B50 Core' : 'Mark Core'}
+                        </button>
+                        <span className="truncate flex-1">{q.question}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Video interview mode toggle */}
             <div className="sm:col-span-2">

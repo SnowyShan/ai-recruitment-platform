@@ -288,6 +288,9 @@ def generate_report_from_transcript(job_description: str, resume_text: str, ques
 
     guidelines = evaluation_prompt.strip() if evaluation_prompt.strip() else "Evaluate answers fairly based on technical correctness and depth. For skipped questions, score 0."
 
+    core_competency_guidelines = """
+For questions marked [CORE_COMPETENCY] in the transcript, also return a "core_competency_probes" array in that question's per_question entry: [{"question": "...", "candidate_answer": "...", "expected_answer": "...", "pass": true/false}]. Parse these from [PROBE_N: ...] markers in the transcript."""
+
     code_eval_guidelines = ""
     if non_empty_code:
         code_eval_guidelines = """
@@ -329,7 +332,7 @@ Full Interview Transcript (questions marked with [Q1:], [Q2:] etc, [SKIPPED] mea
 {full_transcript}{code_section}{draw_section}
 
 Evaluation guidelines:
-{guidelines}{code_eval_guidelines}{draw_eval_guidelines}
+{guidelines}{code_eval_guidelines}{draw_eval_guidelines}{core_competency_guidelines}
 
 Return ONLY valid JSON in this exact format:
 {{
@@ -430,6 +433,103 @@ Return ONLY a JSON array:
     for q in questions:
         q["type"] = "behavioral"
     return questions[:num_questions]
+
+
+def generate_probes(question: str, topic: str, job_description: str) -> list:
+    """Generate exactly 2 probe questions for a core competency question."""
+    client = _client()
+    if not client:
+        return _mock_probes()
+
+    prompt = f"""You are a technical interviewer generating follow-up probe questions for a core competency question.
+
+Main Question: {question}
+Topic: {topic}
+Job Description: {job_description}
+
+Generate exactly 2 probe questions that:
+1. Each probe must have a narrow, verifiable expected answer (short text or binary yes/no)
+2. At least one probe should use presentation_mode "code" if the topic lends itself to it (memory management, algorithms, data structures, concurrency) — include a short code snippet (<=8 lines)
+3. Probes test the same concept from a different angle — not a repeat of the main question
+4. Code snippets must be short, self-contained, and directly relevant
+
+Return ONLY a JSON array with exactly 2 items, each with this structure:
+[
+  {{
+    "question": "Display text for the probe",
+    "voice_text": "Natural spoken version of the question",
+    "presentation_mode": "voice" or "code",
+    "code_snippet": null or "short code here",
+    "expected_answer": "the correct answer",
+    "acceptance_criteria": "What the candidate must demonstrate",
+    "answer_type": "binary" or "short_text"
+  }}
+]"""
+
+    resp = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1200,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    text = resp.content[0].text.strip()
+    start, end = text.find("["), text.rfind("]") + 1
+    return json.loads(text[start:end])
+
+
+def _mock_probes() -> list:
+    return [
+        {
+            "question": "Can you explain the underlying mechanism in more detail?",
+            "voice_text": "Can you explain the underlying mechanism in a bit more detail?",
+            "presentation_mode": "voice",
+            "code_snippet": None,
+            "expected_answer": "Detailed explanation of the mechanism",
+            "acceptance_criteria": "Candidate demonstrates understanding beyond surface-level knowledge",
+            "answer_type": "short_text"
+        },
+        {
+            "question": "What would happen if this constraint were removed?",
+            "voice_text": "What would happen if that constraint were removed?",
+            "presentation_mode": "voice",
+            "code_snippet": None,
+            "expected_answer": "Identifies the consequence of removing the constraint",
+            "acceptance_criteria": "Candidate can reason about edge cases and system behavior",
+            "answer_type": "short_text"
+        }
+    ]
+
+
+def assess_answer_depth(question: str, answer: str, job_description: str, seniority_bar: str) -> dict:
+    """Fast assessment: does the candidate's answer have enough signal to skip probes?"""
+    client = _client()
+    if not client:
+        return {"needs_probing": True, "reason": "No API key — defaulting to probe."}
+
+    bar = SENIORITY_LABELS.get(seniority_bar, "senior engineer")
+
+    prompt = f"""You are a technical interviewer doing a quick depth check on a candidate's answer.
+
+Question: {question}
+Candidate's Answer: {answer}
+Job Description: {job_description}
+Seniority bar: {bar}
+
+Rules:
+- needs_probing: false if the answer is >= 2 sentences AND demonstrates conceptual understanding
+- needs_probing: true if the answer is vague, off-topic, very short, or just buzzwords
+- Skip probes if the answer is already thorough
+
+Return ONLY JSON:
+{{"needs_probing": true/false, "reason": "brief explanation"}}"""
+
+    resp = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=300,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    text = resp.content[0].text.strip()
+    start, end = text.find("{"), text.rfind("}") + 1
+    return json.loads(text[start:end])
 
 
 def _mock_behavioral_questions(n: int) -> list:

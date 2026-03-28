@@ -7,7 +7,7 @@ from .database import init_db, AUDIO_DIR, VIDEO_DIR
 from .routers import (
     questions_router, question_bank_router, job_setup_router,
     evaluate_router, report_router, session_router,
-    testdata_router, settings_router, tts_router,
+    testdata_router, settings_router, tts_router, probe_router,
 )
 
 @asynccontextmanager
@@ -42,6 +42,7 @@ app.include_router(session_router)
 app.include_router(testdata_router)
 app.include_router(settings_router)
 app.include_router(tts_router)
+app.include_router(probe_router)
 
 @app.get("/health")
 def health():

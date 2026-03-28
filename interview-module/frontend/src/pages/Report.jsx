@@ -192,6 +192,17 @@ export default function Report() {
                           <p className="text-slate-600 text-sm" data-testid="draw-analysis">{pq.draw_analysis}</p>
                         </div>
                       )}
+                      {pq.core_competency_probes?.length > 0 && (
+                        <div className="mt-3 p-3 bg-indigo-50 rounded-lg border border-indigo-200">
+                          <p className="text-xs font-semibold text-indigo-700 mb-2">Core Competency Probes</p>
+                          {pq.core_competency_probes.map((probe, pi) => (
+                            <div key={pi} className={`flex items-start gap-2 text-xs mb-1 ${probe.pass ? 'text-emerald-700' : 'text-red-600'}`}>
+                              <span>{probe.pass ? '\u2713' : '\u2717'}</span>
+                              <span><strong>{probe.question}</strong> — answered: &quot;{probe.candidate_answer}&quot;</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

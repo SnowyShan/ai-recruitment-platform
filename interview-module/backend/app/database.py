@@ -10,6 +10,11 @@ def get_conn():
     conn.row_factory = sqlite3.Row
     return conn
 
+def _add_column_if_missing(conn, table, column, definition):
+    cols = [row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
 def init_db():
     os.makedirs(AUDIO_DIR, exist_ok=True)
     os.makedirs(VIDEO_DIR, exist_ok=True)
@@ -81,6 +86,10 @@ def init_db():
         conn.execute("ALTER TABLE questions ADD COLUMN video_path TEXT")
     except Exception:
         pass  # Column already exists
+
+    # Core competency probes
+    _add_column_if_missing(conn, "questions", "is_core_competency", "INTEGER DEFAULT 0")
+    _add_column_if_missing(conn, "questions", "probe_questions", "TEXT DEFAULT NULL")
 
     # Job setup state — tracks background question/audio generation per job
     conn.execute("""

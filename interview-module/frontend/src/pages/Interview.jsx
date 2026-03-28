@@ -63,6 +63,13 @@ export default function Interview() {
   const drawAppStateRef = useRef({})   // questionIndex → appState snapshot
   const excalidrawAPIRef = useRef(null)
 
+  // Core competency probe state
+  const [probePhase, setProbePhase] = useState(null)
+  // null = not in probe mode
+  // { probes: [...], probeIndex: 0 } = probing active
+  const probePhaseRef = useRef(null)
+  const probeTranscriptsRef = useRef({})  // questionIndex -> [probeAnswer0, probeAnswer1, ...]
+
   // Video interview state
   const [videoInterviewEnabled, setVideoInterviewEnabled] = useState(false)
   const videoRef = useRef(null)
@@ -498,12 +505,99 @@ export default function Interview() {
     else setCurrentIndex(idx + 1)
   }
 
+  // ── Core competency probe helpers ──────────────────────────────────────────
+
+  const speakProbeQuestion = useCallback((probe, questionIndex) => {
+    cancelSpeech()
+    if (probe.presentation_mode === 'code') {
+      setActiveTab(t => ({ ...t, [questionIndex]: 'code' }))
+    }
+    speakThenRecord(probe.voice_text || probe.question)
+  }, [speakThenRecord])
+
+  const nextProbe = useCallback(async () => {
+    cancelSpeech()
+    const idx = currentIndexRef.current
+    const blob = await stopRecording()
+    const text = await transcribeBlob(blob)
+
+    const ps = probePhaseRef.current
+    if (!ps) return
+
+    if (!probeTranscriptsRef.current[idx]) probeTranscriptsRef.current[idx] = []
+    probeTranscriptsRef.current[idx].push(text)
+
+    const nextProbeIdx = ps.probeIndex + 1
+
+    if (nextProbeIdx >= ps.probes.length) {
+      probePhaseRef.current = null
+      setProbePhase(null)
+      setActiveTab(t => ({ ...t, [idx]: 'voice' }))
+      advance()
+    } else {
+      const updatedState = { ...ps, probeIndex: nextProbeIdx }
+      probePhaseRef.current = updatedState
+      setProbePhase({ ...updatedState })
+      speakProbeQuestion(ps.probes[nextProbeIdx], idx)
+    }
+  }, [stopRecording, transcribeBlob, advance, speakProbeQuestion])
+
+  const runCoreCompetencyProbes = useCallback(async (mainAnswerText, questionIndex) => {
+    const q = questionsRef.current[questionIndex]
+    if (!q?.is_core_competency || !q?.probe_questions?.length) {
+      advance()
+      return
+    }
+
+    // Quick assess
+    let needsProbing = true
+    try {
+      const res = await axios.post(`${API}/api/interview/probe-assess`, {
+        question: q.question,
+        answer: mainAnswerText,
+        job_description: '',
+        seniority_bar: 'senior',
+      })
+      needsProbing = res.data.needs_probing
+    } catch (_) {
+      // default to probing on error
+    }
+
+    if (!needsProbing) {
+      advance()
+      return
+    }
+
+    // Enter probe mode
+    const probeState = { probes: q.probe_questions, probeIndex: 0 }
+    probePhaseRef.current = probeState
+    setProbePhase({ ...probeState })
+
+    // Speak first probe
+    speakProbeQuestion(q.probe_questions[0], questionIndex)
+  }, [speakProbeQuestion, advance])
+
   const nextQuestion = async () => {
     cancelSpeech()
     const idx = currentIndexRef.current
     const blob = await stopRecording()
     const text = await transcribeBlob(blob)
     transcriptsRef.current[idx] = text
+
+    // If already in probe mode, delegate
+    if (probePhaseRef.current) {
+      await nextProbe()
+      return
+    }
+
+    // Core competency fork
+    const q = questionsRef.current[idx]
+    if (q?.is_core_competency && q?.probe_questions?.length > 0) {
+      await runCoreCompetencyProbes(text, idx)
+      return
+    }
+
+    // Regular path — unchanged
     advance()
   }
 
@@ -540,7 +634,15 @@ export default function Interview() {
     let fullTranscript = ''
     qs.forEach((q, i) => {
       const ans = transcriptsRef.current[i]
-      fullTranscript += `[Q${i + 1}: ${q.question}]\n${ans ?? '(no answer)'}\n\n`
+      fullTranscript += `[Q${i + 1}: ${q.question}]${q.is_core_competency ? ' [CORE_COMPETENCY]' : ''}\n${ans ?? '(no answer)'}\n\n`
+
+      const probeAnswers = probeTranscriptsRef.current[i]
+      if (probeAnswers && probeAnswers.length > 0 && q.probe_questions) {
+        q.probe_questions.forEach((probe, pi) => {
+          const probeAns = probeAnswers[pi] ?? '(no answer)'
+          fullTranscript += `[PROBE_${pi + 1}: ${probe.question}]\n${probeAns}\n\n`
+        })
+      }
     })
 
     setFinishing(true)
@@ -763,7 +865,22 @@ export default function Interview() {
             </button>
           </div>
         </div>
-        <p className="text-base sm:text-lg font-medium text-slate-800 leading-relaxed">{q.question}</p>
+        {probePhase && (
+          <div className="mb-3 px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-lg text-xs text-indigo-700 font-medium">
+            Follow-up {probePhase.probeIndex + 1} of {probePhase.probes.length} — Core competency check
+          </div>
+        )}
+        <p className="text-base sm:text-lg font-medium text-slate-800 leading-relaxed">
+          {probePhase
+            ? probePhase.probes[probePhase.probeIndex]?.question
+            : q.question
+          }
+        </p>
+        {probePhase && probePhase.probes[probePhase.probeIndex]?.presentation_mode === 'code' && (
+          <pre className="mt-3 p-3 bg-slate-900 text-green-300 rounded-lg text-xs overflow-x-auto font-mono whitespace-pre-wrap">
+            {probePhase.probes[probePhase.probeIndex].code_snippet}
+          </pre>
+        )}
         {isSpeaking && (
           <p className="text-xs text-slate-400 mt-3 italic">Recording starts automatically when the question finishes…</p>
         )}

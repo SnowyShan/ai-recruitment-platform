@@ -294,6 +294,49 @@ def _run_job_setup(job_id: int, req: JobSetupRequest):
         conn.close()
 
 
+# ── Core Competency Probes ─────────────────────────────────────────────────────
+
+probe_router = APIRouter(prefix="/api/interview", tags=["Probes"])
+
+class ProbeAssessRequest(BaseModel):
+    question: str
+    answer: str
+    job_description: str = ""
+    seniority_bar: str = "senior"
+
+@probe_router.post("/probe-assess")
+def probe_assess(req: ProbeAssessRequest):
+    result = ai.assess_answer_depth(req.question, req.answer, req.job_description, req.seniority_bar)
+    return result
+
+class CoreCompetencyToggle(BaseModel):
+    enabled: bool
+    job_description: str = ""
+
+@probe_router.put("/question/{question_id}/core-competency")
+def toggle_core_competency(question_id: str, req: CoreCompetencyToggle):
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM questions WHERE id=?", (question_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    if req.enabled:
+        probes = ai.generate_probes(row["question"], row["topic"] or "", req.job_description)
+        conn.execute(
+            "UPDATE questions SET is_core_competency=1, probe_questions=? WHERE id=?",
+            (json.dumps(probes), question_id)
+        )
+    else:
+        conn.execute(
+            "UPDATE questions SET is_core_competency=0, probe_questions=NULL WHERE id=?",
+            (question_id,)
+        )
+    conn.commit()
+    conn.close()
+    return {"question_id": question_id, "is_core_competency": req.enabled}
+
+
 # ── Evaluate ───────────────────────────────────────────────────────────────────
 
 evaluate_router = APIRouter(prefix="/api/interview", tags=["Evaluate"])
@@ -441,6 +484,8 @@ def create_session(req: SessionCreate):
         if row:
             q = dict(row)
             q["type"] = "technical"
+            q["is_core_competency"] = bool(row["is_core_competency"]) if "is_core_competency" in row.keys() else False
+            q["probe_questions"] = json.loads(row["probe_questions"]) if row.get("probe_questions") else []
             q["audio_url"] = f"/audio/{q['audio_path']}" if q.get("audio_path") else None
             q["video_url"] = f"/video/{q['video_path']}" if q.get("video_path") else None
             technical_qs.append(q)
