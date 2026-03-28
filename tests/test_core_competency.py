@@ -375,14 +375,20 @@ def run(record=False):
             # Keeping the session small ensures the CC question is drawn.
             # The num_questions input is the first number input in the config panel.
             print("\n[Step 5] Set num_questions=4 and Save Config")
+            # Use nativeInputValueSetter to trigger React's synthetic onChange
+            # (plain fill() bypasses React controlled input state)
             num_inputs = page.query_selector_all('input[type="number"]')
             for inp in num_inputs:
-                placeholder = inp.get_attribute("placeholder") or ""
-                # Target the questions count input (not time limit)
                 val = inp.input_value()
                 if val and int(val) > 4:
-                    inp.triple_click()
-                    inp.type("4")
+                    inp.click()
+                    page.evaluate("""(el) => {
+                        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                        setter.call(el, '4');
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                    }""", inp)
+                    page.wait_for_timeout(300)
                     break
             page.click("button:has-text('Save Config')", timeout=5_000)
 
@@ -438,9 +444,13 @@ def run(record=False):
                 ctx.close()
                 return False
 
+            # Now that JobDetail.jsx fetches questions scoped to this job (job_id param),
+            # all "Mark Core" buttons in the UI belong to this job's active question set.
+            # Just use the first one.
             mark_core_btn = page.query_selector("button:has-text('Mark Core')")
+
             if not mark_core_btn:
-                passed.append(_check("Found 'Mark Core' button", False, "all questions already flagged?"))
+                passed.append(_check("Found 'Mark Core' button for active job question", False))
                 ctx.close()
                 return False
 
@@ -453,13 +463,39 @@ def run(record=False):
                 pass
 
             mark_core_btn.click()
-            page.wait_for_timeout(3000)  # API call (generates probes) + re-render
 
+            # Wait for ⭐ Core badge — this means the API call completed and probes generated
             try:
-                page.wait_for_selector("button:has-text('\u2b50 Core')", timeout=10_000)
+                page.wait_for_selector("button:has-text('\u2b50 Core')", timeout=15_000)
                 passed.append(_check("'⭐ Core' badge appeared after toggle", True))
             except Exception as e:
                 passed.append(_check("'⭐ Core' badge appeared after toggle", False, str(e)))
+
+            # Verify via API that the flagged question is in the active job question set
+            # and has is_core_competency=True with probe_questions populated
+            print("  Verifying CC flag persisted in DB (scoped to this job)…")
+            cc_confirmed = False
+            try:
+                r = requests.get(f"{INTERVIEW_API}/api/interview/question-bank",
+                                 params={"domain": "all", "job_id": job_id, "limit": 50}, timeout=10)
+                if r.status_code == 200:
+                    for q in r.json().get("questions", []):
+                        if q.get("is_core_competency"):
+                            probes_raw = q.get("probe_questions")
+                            probes = json.loads(probes_raw) if isinstance(probes_raw, str) and probes_raw else (probes_raw or [])
+                            if probes:
+                                cc_confirmed = True
+                                print(f"  CC question confirmed: {q['question'][:60]}… ({len(probes)} probes)")
+                                break
+            except Exception as e:
+                print(f"  CC verification failed: {e}")
+            passed.append(_check("CC flag + probes confirmed in DB (this job's questions)", cc_confirmed))
+            if not cc_confirmed:
+                ctx.close()
+                return False
+
+            # Small buffer to ensure DB writes are fully committed
+            page.wait_for_timeout(1000)
 
             # ── Step 7: Click Mock Interview ──────────────────────────────
             print("\n[Step 7] Click Mock Interview button")

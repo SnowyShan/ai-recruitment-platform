@@ -50,15 +50,38 @@ question_bank_router = APIRouter(prefix="/api/interview", tags=["QuestionBank"])
 def search_question_bank(
     domain: str,
     difficulty: Optional[int] = None,
+    job_id: Optional[int] = None,
     limit: int = Query(30, le=100),
 ):
     """Search the shared question bank by domain and difficulty.
-    Pass domain='all' (or omit a specific domain) to return questions
-    across all domains — used by the create-job modal on open.
+    Pass domain='all' to return questions across all domains.
+    Pass job_id to restrict results to only the questions belonging to that job's setup.
     """
     conn = get_conn()
+
+    # If job_id provided, fetch only that job's question IDs and filter to those
+    job_question_ids = None
+    if job_id is not None:
+        setup_row = conn.execute("SELECT question_ids FROM job_setup WHERE job_id=?", (job_id,)).fetchone()
+        if setup_row and setup_row["question_ids"]:
+            try:
+                job_question_ids = json.loads(setup_row["question_ids"])
+            except Exception:
+                pass
+
     all_domains = (domain.lower() == "all")
-    if all_domains:
+
+    if job_question_ids is not None:
+        # Return only questions in this job's active set
+        placeholders = ",".join("?" for _ in job_question_ids)
+        if placeholders:
+            rows = conn.execute(
+                f"SELECT * FROM questions WHERE id IN ({placeholders}) ORDER BY created_at DESC LIMIT ?",
+                (*job_question_ids, limit)
+            ).fetchall()
+        else:
+            rows = []
+    elif all_domains:
         if difficulty:
             rows = conn.execute(
                 "SELECT * FROM questions WHERE difficulty=? ORDER BY created_at DESC LIMIT ?",

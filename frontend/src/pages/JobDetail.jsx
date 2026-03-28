@@ -698,10 +698,12 @@ export default function JobDetail() {
       try {
         const res = await axios.get(`${INTERVIEW_API}/api/interview/job/${id}/setup/status`);
         setVideoModeEnabled(!!res.data.video_interview_enabled);
-      } catch (_) {}
-      try {
-        const res = await axios.get(`${INTERVIEW_API}/api/interview/question-bank`, { params: { domain: 'all', limit: 50 } });
-        setJobQuestions(res.data.questions || []);
+        // Fetch only the questions belonging to this job using the job's domain
+        const domain = res.data.domain || 'all';
+        const qRes = await axios.get(`${INTERVIEW_API}/api/interview/question-bank`, {
+          params: { domain, job_id: id, limit: 50 }
+        });
+        setJobQuestions(qRes.data.questions || []);
       } catch (_) {}
     };
     load();
@@ -717,8 +719,12 @@ export default function JobDetail() {
         enabled: !currentlyEnabled,
         job_description: jd,
       });
-      // Refresh question list
-      const res = await axios.get(`${INTERVIEW_API}/api/interview/question-bank`, { params: { domain: 'all', limit: 50 } });
+      // Refresh question list — scope to this job's domain
+      const statusRes = await axios.get(`${INTERVIEW_API}/api/interview/job/${id}/setup/status`).catch(() => ({ data: {} }));
+      const domain = statusRes.data.domain || 'all';
+      const res = await axios.get(`${INTERVIEW_API}/api/interview/question-bank`, {
+        params: { domain, job_id: id, limit: 50 }
+      });
       setJobQuestions(res.data.questions || []);
     } catch (e) {
       console.error('Failed to toggle core competency', e);
