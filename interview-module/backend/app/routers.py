@@ -485,7 +485,7 @@ def create_session(req: SessionCreate):
             q = dict(row)
             q["type"] = "technical"
             q["is_core_competency"] = bool(row["is_core_competency"]) if "is_core_competency" in row.keys() else False
-            q["probe_questions"] = json.loads(row["probe_questions"]) if row.get("probe_questions") else []
+            q["probe_questions"] = json.loads(row["probe_questions"]) if row["probe_questions"] else []
             q["audio_url"] = f"/audio/{q['audio_path']}" if q.get("audio_path") else None
             q["video_url"] = f"/video/{q['video_path']}" if q.get("video_path") else None
             technical_qs.append(q)

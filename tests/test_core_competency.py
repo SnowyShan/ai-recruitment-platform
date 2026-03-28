@@ -131,6 +131,14 @@ def _check_blackhole():
     return result.returncode == 0
 
 
+def _restore_audio():
+    """Restore system audio input to built-in mic after BlackHole use."""
+    subprocess.run(
+        ["SwitchAudioSource", "-s", "MacBook Pro Microphone", "-t", "input"],
+        capture_output=True
+    )
+
+
 def _auth():
     r = requests.post(f"{TB_API}/api/auth/register", json={
         "email": TEST_EMAIL, "password": TEST_PASSWORD,
@@ -145,6 +153,11 @@ def _auth():
 
 
 def _create_and_setup_job(token):
+    """
+    Create a job via TB, then trigger interview module setup DIRECTLY via the
+    interview module API. This bypasses TB's INTERVIEW_API_URL env var which may
+    point at a stale Cloudflare tunnel rather than localhost:8001.
+    """
     headers = {"Authorization": f"Bearer {token}"}
     r = requests.post(f"{TB_API}/api/jobs/", headers=headers, json=TEST_JOB)
     if r.status_code not in (200, 201):
@@ -153,38 +166,51 @@ def _create_and_setup_job(token):
     job_id = job["id"]
     print(f"  Created job {job_id}")
 
-    requests.put(
-        f"{TB_API}/api/jobs/{job_id}",
-        json={"interview_num_questions": 4, "interview_difficulty": 3,
-              "interview_seniority": "senior", "interview_behavioral_pct": 0},
-        headers=headers,
+    jd = f"{TEST_JOB['description']}\n\n{TEST_JOB['requirements']}"
+
+    # Call interview module setup directly — avoids stale tunnel URL in TB .env
+    setup_r = requests.post(
+        f"{INTERVIEW_API}/api/interview/job/{job_id}/setup",
+        json={
+            "job_title": TEST_JOB["title"],
+            "job_description": jd,
+            "domain": "ios",
+            "difficulty": 3,
+            "seniority": "senior",
+            "num_technical": 4,
+            "selected_question_ids": [],
+            "generate_video": False,
+        },
+        timeout=10,
     )
+    if setup_r.status_code not in (200, 202):
+        raise RuntimeError(f"Interview module setup trigger failed: {setup_r.text}")
 
     print("  Waiting for question bank…", end="", flush=True)
     retried = False
     deadline = time.time() + SETUP_TIMEOUT
     while time.time() < deadline:
-        r = requests.get(f"{TB_API}/api/jobs/{job_id}/setup-status", headers=headers)
-        if r.status_code == 200:
-            s = r.json()
-            status = s.get("setup_status") or s.get("status")
-            if status == "ready":
-                print(" ✅")
-                break
-            if status == "failed" and not retried:
-                print(" failed, retrying", end="", flush=True)
-                requests.put(
-                    f"{TB_API}/api/jobs/{job_id}",
-                    json={"interview_num_questions": 4, "interview_difficulty": 3,
-                          "interview_seniority": "senior", "interview_behavioral_pct": 0},
-                    headers=headers,
-                )
-                retried = True
-                time.sleep(5)
-                continue
-            if status == "failed" and retried:
-                print(" ❌ failed after retry")
-                return job_id, []
+        s = requests.get(f"{INTERVIEW_API}/api/interview/job/{job_id}/setup/status").json()
+        status = s.get("status")
+        if status == "ready":
+            print(" ✅")
+            break
+        if status == "failed" and not retried:
+            print(" failed, retrying", end="", flush=True)
+            requests.post(
+                f"{INTERVIEW_API}/api/interview/job/{job_id}/setup",
+                json={"job_title": TEST_JOB["title"], "job_description": jd,
+                      "domain": "ios", "difficulty": 3, "seniority": "senior",
+                      "num_technical": 4, "selected_question_ids": [],
+                      "generate_video": False},
+                timeout=10,
+            )
+            retried = True
+            time.sleep(5)
+            continue
+        if status == "failed" and retried:
+            print(" ❌ failed after retry")
+            return job_id, []
         time.sleep(3)
         print(".", end="", flush=True)
     else:
@@ -194,7 +220,7 @@ def _create_and_setup_job(token):
     requests.post(f"{TB_API}/api/jobs/{job_id}/publish", headers=headers)
 
     r = requests.get(f"{INTERVIEW_API}/api/interview/question-bank",
-                     params={"domain": "all", "limit": 20})
+                     params={"domain": "ios", "limit": 20})
     questions = r.json().get("questions", []) if r.status_code == 200 else []
     return job_id, questions
 
@@ -573,6 +599,14 @@ def test_browser_cc_flow_real_audio(job_id, record=False):
         "time_limit": 45, "num_questions": 4, "behavioral_pct": 0,
         "job_id": job_id,
     })
+    if sess_r.status_code == 409:
+        passed.append(_check(
+            "Session created for browser test",
+            False,
+            f"409 — job setup not ready: {sess_r.json().get('detail', '')}"
+        ))
+        _restore_audio()
+        return passed
     sess_r.raise_for_status()
     sess_data    = sess_r.json()
     session_id   = sess_data["session_id"]
@@ -837,11 +871,7 @@ def test_browser_cc_flow_real_audio(job_id, record=False):
             print(f"  📹 Video saved: {final}")
 
     finally:
-        # Always restore system audio input to built-in mic
-        subprocess.run(
-            ["SwitchAudioSource", "-s", "MacBook Pro Microphone", "-t", "input"],
-            capture_output=True
-        )
+        _restore_audio()
 
     return passed
 
