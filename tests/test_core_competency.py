@@ -375,21 +375,18 @@ def run(record=False):
             # Keeping the session small ensures the CC question is drawn.
             # The num_questions input is the first number input in the config panel.
             print("\n[Step 5] Set num_questions=4 and Save Config")
-            # Use nativeInputValueSetter to trigger React's synthetic onChange
-            # (plain fill() bypasses React controlled input state)
-            num_inputs = page.query_selector_all('input[type="number"]')
-            for inp in num_inputs:
-                val = inp.input_value()
-                if val and int(val) > 4:
-                    inp.click()
-                    page.evaluate("""(el) => {
-                        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-                        setter.call(el, '4');
-                        el.dispatchEvent(new Event('input', { bubbles: true }));
-                        el.dispatchEvent(new Event('change', { bubbles: true }));
-                    }""", inp)
-                    page.wait_for_timeout(300)
-                    break
+            # Set behavioral_pct to 0 via the range slider so ALL session questions
+            # come from the pre-generated bank. With only 6 questions in the bank,
+            # the session draws all 6 — guaranteeing the CC question is included.
+            range_inputs = page.query_selector_all('input[type="range"]')
+            for inp in range_inputs:
+                page.evaluate("""(el) => {
+                    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                    setter.call(el, '0');
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                }""", inp)
+            page.wait_for_timeout(300)
             page.click("button:has-text('Save Config')", timeout=5_000)
 
             try:
@@ -471,31 +468,51 @@ def run(record=False):
             except Exception as e:
                 passed.append(_check("'⭐ Core' badge appeared after toggle", False, str(e)))
 
-            # Verify via API that the flagged question is in the active job question set
-            # and has is_core_competency=True with probe_questions populated
-            print("  Verifying CC flag persisted in DB (scoped to this job)…")
+            # Poll the interview module DB directly until the CC question for THIS job
+            # has is_core_competency=1 AND probe_questions populated.
+            # This guards against clicking Mock Interview before probe generation finishes.
+            print("  Waiting for CC probes to be generated in DB…", end="", flush=True)
+            import sqlite3 as _sqlite3
+            DB_PATH = os.path.expanduser(
+                "~/Documents/projects/ai-recruitment-platform/interview-module/backend/interview.db"
+            )
             cc_confirmed = False
-            try:
-                r = requests.get(f"{INTERVIEW_API}/api/interview/question-bank",
-                                 params={"domain": "all", "job_id": job_id, "limit": 50}, timeout=10)
-                if r.status_code == 200:
-                    for q in r.json().get("questions", []):
-                        if q.get("is_core_competency"):
-                            probes_raw = q.get("probe_questions")
-                            probes = json.loads(probes_raw) if isinstance(probes_raw, str) and probes_raw else (probes_raw or [])
-                            if probes:
-                                cc_confirmed = True
-                                print(f"  CC question confirmed: {q['question'][:60]}… ({len(probes)} probes)")
-                                break
-            except Exception as e:
-                print(f"  CC verification failed: {e}")
-            passed.append(_check("CC flag + probes confirmed in DB (this job's questions)", cc_confirmed))
+            flagged_q_id = None
+            for _ in range(30):  # up to 30s
+                try:
+                    conn = _sqlite3.connect(DB_PATH)
+                    conn.row_factory = _sqlite3.Row
+                    setup_row = conn.execute(
+                        "SELECT question_ids FROM job_setup WHERE job_id=?", (int(job_id),)
+                    ).fetchone()
+                    if setup_row:
+                        qids = json.loads(setup_row["question_ids"] or "[]")
+                        for qid in qids:
+                            q = conn.execute(
+                                "SELECT id, question, is_core_competency, probe_questions FROM questions WHERE id=?",
+                                (qid,)
+                            ).fetchone()
+                            if q and q["is_core_competency"]:
+                                probes = json.loads(q["probe_questions"]) if q["probe_questions"] else []
+                                if probes:
+                                    cc_confirmed = True
+                                    flagged_q_id = q["id"]
+                                    print(f"\n  CC confirmed: {q['question'][:60]}… ({len(probes)} probes)")
+                                    break
+                    conn.close()
+                except Exception as e:
+                    print(f"\n  DB check error: {e}")
+                if cc_confirmed:
+                    break
+                time.sleep(1)
+                print(".", end="", flush=True)
+
+            if not cc_confirmed:
+                print()
+            passed.append(_check("CC flag + probes confirmed in this job's question bank", cc_confirmed))
             if not cc_confirmed:
                 ctx.close()
                 return False
-
-            # Small buffer to ensure DB writes are fully committed
-            page.wait_for_timeout(1000)
 
             # ── Step 7: Click Mock Interview ──────────────────────────────
             print("\n[Step 7] Click Mock Interview button")
