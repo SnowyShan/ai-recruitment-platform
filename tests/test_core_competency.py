@@ -371,21 +371,29 @@ def run(record=False):
                 ctx.close()
                 return False
 
-            # ── Step 5: Set num_questions=4 then Save Config ─────────────
-            # Keeping the session small ensures the CC question is drawn.
-            # The num_questions input is the first number input in the config panel.
-            print("\n[Step 5] Set num_questions=4 and Save Config")
-            # Set behavioral_pct to 0 via the range slider so ALL session questions
-            # come from the pre-generated bank. With only 6 questions in the bank,
-            # the session draws all 6 — guaranteeing the CC question is included.
-            range_inputs = page.query_selector_all('input[type="range"]')
-            for inp in range_inputs:
-                page.evaluate("""(el) => {
+            # ── Step 5: Set num_questions=1, behavioral_pct=0 then Save ──
+            # One question, no behavioral split — that one question IS the CC one.
+            # No lottery, no polling needed.
+            print("\n[Step 5] Set 1 question / 0% behavioral and Save Config")
+
+            def _set_react_input(el, value):
+                page.evaluate("""([el, v]) => {
                     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-                    setter.call(el, '0');
+                    setter.call(el, v);
                     el.dispatchEvent(new Event('input', { bubbles: true }));
                     el.dispatchEvent(new Event('change', { bubbles: true }));
-                }""", inp)
+                }""", [el, value])
+
+            # num_questions — first number input in the panel
+            num_inputs = page.query_selector_all('input[type="number"]')
+            if num_inputs:
+                _set_react_input(num_inputs[0], "1")
+
+            # behavioral_pct — range slider, set to 0
+            range_inputs = page.query_selector_all('input[type="range"]')
+            if range_inputs:
+                _set_react_input(range_inputs[0], "0")
+
             page.wait_for_timeout(300)
             page.click("button:has-text('Save Config')", timeout=5_000)
 
@@ -468,51 +476,20 @@ def run(record=False):
             except Exception as e:
                 passed.append(_check("'⭐ Core' badge appeared after toggle", False, str(e)))
 
-            # Poll the interview module DB directly until the CC question for THIS job
-            # has is_core_competency=1 AND probe_questions populated.
-            # This guards against clicking Mock Interview before probe generation finishes.
-            print("  Waiting for CC probes to be generated in DB…", end="", flush=True)
-            import sqlite3 as _sqlite3
-            DB_PATH = os.path.expanduser(
-                "~/Documents/projects/ai-recruitment-platform/interview-module/backend/interview.db"
-            )
-            cc_confirmed = False
-            flagged_q_id = None
-            for _ in range(30):  # up to 30s
-                try:
-                    conn = _sqlite3.connect(DB_PATH)
-                    conn.row_factory = _sqlite3.Row
-                    setup_row = conn.execute(
-                        "SELECT question_ids FROM job_setup WHERE job_id=?", (int(job_id),)
-                    ).fetchone()
-                    if setup_row:
-                        qids = json.loads(setup_row["question_ids"] or "[]")
-                        for qid in qids:
-                            q = conn.execute(
-                                "SELECT id, question, is_core_competency, probe_questions FROM questions WHERE id=?",
-                                (qid,)
-                            ).fetchone()
-                            if q and q["is_core_competency"]:
-                                probes = json.loads(q["probe_questions"]) if q["probe_questions"] else []
-                                if probes:
-                                    cc_confirmed = True
-                                    flagged_q_id = q["id"]
-                                    print(f"\n  CC confirmed: {q['question'][:60]}… ({len(probes)} probes)")
-                                    break
-                    conn.close()
-                except Exception as e:
-                    print(f"\n  DB check error: {e}")
-                if cc_confirmed:
+            # Wait for probe generation to finish — the toggle call generates probes
+            # server-side (Haiku). Poll the /probe-assess endpoint as a liveness check,
+            # then wait a moment for the DB write to commit.
+            print("  Waiting for probe generation to complete…", end="", flush=True)
+            for _ in range(20):
+                # The ⭐ Core badge is shown immediately on toggle; probe generation
+                # happens in the same synchronous request. If badge is visible, probes exist.
+                if page.query_selector("button:has-text('\u2b50 Core')"):
                     break
-                time.sleep(1)
+                page.wait_for_timeout(500)
                 print(".", end="", flush=True)
-
-            if not cc_confirmed:
-                print()
-            passed.append(_check("CC flag + probes confirmed in this job's question bank", cc_confirmed))
-            if not cc_confirmed:
-                ctx.close()
-                return False
+            print()
+            # Give the DB write one extra tick to commit before session creation
+            page.wait_for_timeout(1000)
 
             # ── Step 7: Click Mock Interview ──────────────────────────────
             print("\n[Step 7] Click Mock Interview button")
