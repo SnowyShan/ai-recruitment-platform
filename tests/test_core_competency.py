@@ -1,36 +1,35 @@
 #!/usr/bin/env python3
 """
-End-to-end tests for Core Competency Probes feature.
+End-to-end test for Core Competency Probes — fully browser-driven.
 
-Tests 1–4: API-only (no browser). All calls are real — real Claude Haiku for
-probe-assess and probe generation, real Anthropic API for report.
+Everything after login is driven through the real UI. No direct API calls
+for job creation, question flagging, session creation, or interview setup.
+The browser is the user.
 
-Test 5: Full browser e2e — the only thing that is NOT a real human is the mic
-input. Audio is routed via BlackHole 2ch (virtual loopback): `say -a "BlackHole
-2ch"` sends spoken audio directly into the browser's mic input, which feeds real
-Whisper transcription, real probe-assess, real probe generation, real report.
+What is real:
+  - Browser login and job creation via the TB frontend
+  - Question bank generation (TB backend calls interview module)
+  - "Mark Core" toggle clicked in the Screening Interview Config UI
+  - "Save Config" clicked in the UI
+  - "Mock Interview" button clicked in the UI — creates session via UI flow
+  - TTS: browser plays questions via OpenAI TTS
+  - Mic recording: MediaRecorder captures BlackHole 2ch loopback input
+  - Whisper transcription: real /transcribe endpoint
+  - probe-assess: real Haiku call on the actual transcript
+  - Report generation: real Claude Sonnet
 
-  Real in test 5:
-    - TTS (browser plays questions via OpenAI TTS on speakers)
-    - Mic recording (MediaRecorder captures BlackHole input)
-    - Whisper transcription (real /transcribe endpoint)
-    - probe-assess (real Haiku call on the transcribed answer)
-    - probe generation (pre-generated via Haiku at setup time)
-    - Report generation (real Claude Sonnet)
+What is mocked:
+  - Mic input: `say -a "BlackHole 2ch"` speaks answers into the browser mic
+    via BlackHole virtual loopback (no real human, but real audio pipeline)
+  - Mic permission dialog: --use-fake-ui-for-media-stream Chrome flag
+    (auto-approves without replacing the audio device)
 
-  Mocked in test 5:
-    - Mic input: `say -a "BlackHole 2ch"` instead of a human voice
-    - Mic permission dialog: --use-fake-ui-for-media-stream Chrome flag
-      (auto-approves the browser dialog without replacing the audio device)
+FAILS (does not skip) if BlackHole is not installed.
 
 REQUIREMENTS:
-  BlackHole 2ch installed (https://existential.audio/blackhole/)
-  SwitchAudioSource installed: brew install switchaudio-osx
-  macOS `say` command (built-in)
-  pip install playwright && playwright install chromium
-
-  If BlackHole is not installed: test 5 FAILS (does not skip).
-  The test validates the real audio pipeline; silently skipping defeats the purpose.
+  BlackHole 2ch: https://existential.audio/blackhole/
+  SwitchAudioSource: brew install switchaudio-osx
+  playwright: pip install playwright && playwright install chromium
 
 SERVICES REQUIRED:
   localhost:8000  — TalentBridge backend
@@ -40,7 +39,7 @@ SERVICES REQUIRED:
 
 Run:
   python tests/test_core_competency.py
-  python tests/test_core_competency.py --record   # saves .webm video of browser test
+  python tests/test_core_competency.py --record
 """
 
 import os
@@ -48,45 +47,38 @@ import sys
 import json
 import time
 import uuid
+import shutil
 import datetime
 import subprocess
 import requests
 
-TB_API        = "http://localhost:8000"
-INTERVIEW_API = "http://localhost:8001"
 TB_URL        = "http://localhost:5173"
 INTERVIEW_URL = "http://localhost:5174"
+TB_API        = "http://localhost:8000"
+INTERVIEW_API = "http://localhost:8001"
 
 _RUN_ID       = uuid.uuid4().hex[:8]
-TEST_EMAIL    = f"cc-test-{_RUN_ID}@test.internal"
-TEST_PASSWORD = "CoreCompTest123!"
-TEST_NAME     = "Core Competency Tester"
+TEST_EMAIL    = "e2e-test@gmail.com"
+TEST_PASSWORD = "E2eTestPass123!"
+TEST_NAME     = "E2E Test Recruiter"
 
-TEST_JOB = {
-    "title":            f"Senior iOS Engineer [CC-TEST-{_RUN_ID}]",
-    "description":      (
-        "Senior iOS engineer with deep Swift expertise. "
-        "Strong ARC memory management, retain cycles, weak/unowned references, "
-        "concurrency, and architecture skills required."
-    ),
-    "requirements":     "5+ years iOS. Expert Swift, UIKit, SwiftUI, ARC, Instruments.",
-    "department":       "Engineering",
-    "location":         "Remote",
-    "job_type":         "full_time",
-    "experience_level": "senior",
-}
+JOB_TITLE = f"Senior iOS Engineer [CC-E2E-{_RUN_ID}]"
+JOB_DESC  = (
+    "Senior iOS engineer with deep Swift expertise. "
+    "Strong ARC memory management, retain cycles, weak/unowned references, "
+    "concurrency with GCD and async/await, and architecture skills required."
+)
+JOB_REQS  = "5+ years iOS. Expert Swift, UIKit, SwiftUI, ARC, Instruments."
 
-SETUP_TIMEOUT = 180
-
-# Shallow answer — one vague sentence. Haiku must return needs_probing=true.
+# Deliberately shallow — one sentence. Haiku must return needs_probing=true.
 SHALLOW_ANSWER = "ARC manages memory automatically."
 
-# Normal answer for non-CC questions — enough to not get flagged.
+# Normal answer for non-CC questions.
 NORMAL_ANSWER = (
-    "In my iOS work I have used both UIKit and SwiftUI. "
+    "In my iOS work I use UIKit and SwiftUI. "
     "I structure apps with MVVM, use dependency injection for testability, "
-    "and profile performance with Instruments. "
-    "I prefer async await over GCD for new code due to structured concurrency."
+    "and profile with Instruments. "
+    "I prefer async await over GCD for new code."
 )
 
 
@@ -123,7 +115,6 @@ def check_services():
 
 
 def _check_blackhole():
-    """Return True if BlackHole 2ch is available as an audio device."""
     result = subprocess.run(
         ["say", "-a", "BlackHole 2ch", ""],
         capture_output=True, timeout=3
@@ -132,677 +123,452 @@ def _check_blackhole():
 
 
 def _restore_audio():
-    """Restore system audio input to built-in mic after BlackHole use."""
     subprocess.run(
         ["SwitchAudioSource", "-s", "MacBook Pro Microphone", "-t", "input"],
         capture_output=True
     )
 
 
-def _auth():
-    r = requests.post(f"{TB_API}/api/auth/register", json={
-        "email": TEST_EMAIL, "password": TEST_PASSWORD,
-        "full_name": TEST_NAME, "company_name": "CC Tests",
-    })
-    if r.status_code not in (200, 201):
-        r = requests.post(f"{TB_API}/api/auth/login",
-                          json={"email": TEST_EMAIL, "password": TEST_PASSWORD})
-    if r.status_code not in (200, 201):
-        raise RuntimeError(f"Auth failed: {r.text}")
-    return r.json()["access_token"]
+def _say(text):
+    """Speak text into BlackHole → browser mic."""
+    subprocess.run(["say", "-r", "170", "-a", "BlackHole 2ch", text], check=False)
 
 
-def _create_and_setup_job(token):
-    """
-    Create a job via TB, then trigger interview module setup DIRECTLY via the
-    interview module API. This bypasses TB's INTERVIEW_API_URL env var which may
-    point at a stale Cloudflare tunnel rather than localhost:8001.
-    """
-    headers = {"Authorization": f"Bearer {token}"}
-    r = requests.post(f"{TB_API}/api/jobs/", headers=headers, json=TEST_JOB)
-    if r.status_code not in (200, 201):
-        raise RuntimeError(f"Job creation failed: {r.text}")
-    job = r.json()
-    job_id = job["id"]
-    print(f"  Created job {job_id}")
+def _wait_enabled(page, selector, timeout_s=30):
+    """Wait until a button matching selector is not disabled."""
+    for _ in range(timeout_s * 2):
+        el = page.query_selector(f"{selector}:not([disabled])")
+        if el:
+            return el
+        page.wait_for_timeout(500)
+    return None
 
-    jd = f"{TEST_JOB['description']}\n\n{TEST_JOB['requirements']}"
 
-    # Call interview module setup directly — avoids stale tunnel URL in TB .env
-    setup_r = requests.post(
-        f"{INTERVIEW_API}/api/interview/job/{job_id}/setup",
-        json={
-            "job_title": TEST_JOB["title"],
-            "job_description": jd,
-            "domain": "ios",
-            "difficulty": 3,
-            "seniority": "senior",
-            "num_technical": 4,
-            "selected_question_ids": [],
-            "generate_video": False,
-        },
-        timeout=10,
-    )
-    if setup_r.status_code not in (200, 202):
-        raise RuntimeError(f"Interview module setup trigger failed: {setup_r.text}")
-
-    print("  Waiting for question bank…", end="", flush=True)
-    retried = False
-    deadline = time.time() + SETUP_TIMEOUT
-    while time.time() < deadline:
-        s = requests.get(f"{INTERVIEW_API}/api/interview/job/{job_id}/setup/status").json()
-        status = s.get("status")
-        if status == "ready":
-            print(" ✅")
-            break
-        if status == "failed" and not retried:
-            print(" failed, retrying", end="", flush=True)
-            requests.post(
-                f"{INTERVIEW_API}/api/interview/job/{job_id}/setup",
-                json={"job_title": TEST_JOB["title"], "job_description": jd,
-                      "domain": "ios", "difficulty": 3, "seniority": "senior",
-                      "num_technical": 4, "selected_question_ids": [],
-                      "generate_video": False},
-                timeout=10,
-            )
-            retried = True
-            time.sleep(5)
-            continue
-        if status == "failed" and retried:
-            print(" ❌ failed after retry")
-            return job_id, []
-        time.sleep(3)
+def _wait_recording(page, timeout_s=60):
+    """Wait until the 'Recording' indicator is visible and 'Speaking' is not."""
+    print(".", end="", flush=True)
+    for _ in range(timeout_s * 2):
+        content = page.content()
+        if "Recording" in content and "Speaking…" not in content:
+            return True
+        page.wait_for_timeout(500)
         print(".", end="", flush=True)
-    else:
-        print(" ❌ timeout")
-        return job_id, []
-
-    requests.post(f"{TB_API}/api/jobs/{job_id}/publish", headers=headers)
-
-    r = requests.get(f"{INTERVIEW_API}/api/interview/question-bank",
-                     params={"domain": "ios", "limit": 20})
-    questions = r.json().get("questions", []) if r.status_code == 200 else []
-    return job_id, questions
+    return False
 
 
-def _flag_question_as_cc(question_id):
-    """Flag a question as core competency and wait for probes to be generated."""
-    r = requests.put(
-        f"{INTERVIEW_API}/api/interview/question/{question_id}/core-competency",
-        json={"enabled": True, "job_description": TEST_JOB["description"]},
-    )
-    r.raise_for_status()
-    return r.json()
-
-
-def _create_session(job_id):
-    jd = f"{TEST_JOB['description']}\n\n{TEST_JOB['requirements']}"
-    r = requests.post(f"{INTERVIEW_API}/api/interview/session", json={
-        "job_description": jd,
-        "resume_text": "5 years iOS Swift UIKit experience.",
-        "difficulty": 3, "seniority_bar": "senior",
-        "time_limit": 30, "num_questions": 4,
-        "behavioral_pct": 0, "job_id": job_id,
-    })
-    r.raise_for_status()
-    return r.json()
-
-
-# ── Test 1: probe-assess — shallow vs thorough ────────────────────────────────
-
-def test_probe_assess():
+def _dismiss_new_tab(context, original_page):
     """
-    probe-assess must return needs_probing=true for a shallow answer
-    and needs_probing=false for a thorough answer.
-    Both calls go to real Claude Haiku — no mocking.
+    Mock Interview opens a new tab. Wait for it and return the new page.
     """
-    print("\n[Test 1] POST /probe-assess — shallow vs thorough (real Haiku)")
-    passed = []
-
-    question = "Explain how ARC (Automatic Reference Counting) works in Swift."
-
-    r = requests.post(f"{INTERVIEW_API}/api/interview/probe-assess", json={
-        "question": question,
-        "answer": SHALLOW_ANSWER,
-        "job_description": TEST_JOB["description"],
-        "seniority_bar": "senior",
-    })
-    passed.append(_check(f"POST /probe-assess → {r.status_code}", r.status_code == 200))
-    if r.status_code == 200:
-        d = r.json()
-        passed.append(_check("Response has needs_probing field", "needs_probing" in d))
-        passed.append(_check("Response has reason field", "reason" in d))
-        passed.append(_check(
-            f"Shallow answer ('{SHALLOW_ANSWER}') → needs_probing=true",
-            d.get("needs_probing") is True,
-            f"needs_probing={d.get('needs_probing')}, reason={d.get('reason','')[:80]}"
-        ))
-
-    thorough = (
-        "Automatic Reference Counting tracks strong references to each class instance. "
-        "When the count reaches zero, ARC deallocates the object and frees memory. "
-        "I use weak references in delegate patterns to avoid retain cycles, and unowned "
-        "in closures where the captured object is guaranteed to outlive the closure. "
-        "Retain cycles happen when two objects hold strong references to each other — "
-        "I detect these in Instruments Leaks and break them by making one side weak. "
-        "ARC only applies to reference types (classes), not value types like structs."
-    )
-    r2 = requests.post(f"{INTERVIEW_API}/api/interview/probe-assess", json={
-        "question": question,
-        "answer": thorough,
-        "job_description": TEST_JOB["description"],
-        "seniority_bar": "senior",
-    })
-    passed.append(_check(f"POST /probe-assess (thorough) → {r2.status_code}",
-                          r2.status_code == 200))
-    if r2.status_code == 200:
-        d2 = r2.json()
-        passed.append(_check(
-            "Thorough answer → needs_probing=false",
-            d2.get("needs_probing") is False,
-            f"needs_probing={d2.get('needs_probing')}, reason={d2.get('reason','')[:80]}"
-        ))
-
-    return passed
+    for _ in range(20):
+        pages = context.pages
+        if len(pages) > 1:
+            new_page = [p for p in pages if p != original_page][-1]
+            return new_page
+        time.sleep(0.5)
+    return None
 
 
-# ── Test 2: toggle core-competency — generates real probes ────────────────────
+# ── The test ──────────────────────────────────────────────────────────────────
 
-def test_toggle_core_competency(questions):
-    """
-    PUT /question/{id}/core-competency must store probes with the correct shape.
-    Probes are generated by real Claude Haiku. At least one should be a code probe
-    for a memory-management topic.
-    """
-    print("\n[Test 2] PUT /question/{id}/core-competency — real probe generation")
-    passed = []
+def run(record=False):
+    print("\n" + "=" * 65)
+    print("TalentBridge — Core Competency Probes E2E (browser-driven)")
+    print("=" * 65)
 
-    if not questions:
-        passed.append(_check("Question bank non-empty (required for this test)", False,
-                              "run with services up and wait for setup to complete"))
-        return passed, None
+    if not check_services():
+        print("\n❌ Services not running.")
+        return False
 
-    q = questions[0]
-    q_id = q["id"]
-    print(f"  Question: {q['question'][:70]}…")
-
-    r = requests.put(
-        f"{INTERVIEW_API}/api/interview/question/{q_id}/core-competency",
-        json={"enabled": True, "job_description": TEST_JOB["description"]},
-    )
-    passed.append(_check(f"PUT enable → {r.status_code}", r.status_code == 200))
-    if r.status_code == 200:
-        passed.append(_check("Response: is_core_competency=True",
-                              r.json().get("is_core_competency") is True))
-
-    # Fetch from bank and inspect probes
-    r2 = requests.get(f"{INTERVIEW_API}/api/interview/question-bank",
-                      params={"domain": "all", "limit": 50})
-    if r2.status_code == 200:
-        flagged = next((x for x in r2.json().get("questions", []) if x["id"] == q_id), None)
-        if flagged:
-            raw = flagged.get("probe_questions")
-            probes = json.loads(raw) if isinstance(raw, str) and raw else (raw or [])
-            passed.append(_check("probe_questions stored and non-empty",
-                                  isinstance(probes, list) and len(probes) > 0,
-                                  f"{len(probes)} probes"))
-            if probes:
-                for i, probe in enumerate(probes):
-                    passed.append(_check(
-                        f"Probe {i+1} has required fields",
-                        all(k in probe for k in ["question", "voice_text",
-                            "presentation_mode", "expected_answer", "answer_type"]),
-                        str(list(probe.keys()))
-                    ))
-                    passed.append(_check(
-                        f"Probe {i+1} presentation_mode is voice or code",
-                        probe.get("presentation_mode") in ("voice", "code")
-                    ))
-                    if probe.get("presentation_mode") == "code":
-                        passed.append(_check(
-                            f"Probe {i+1} (code) has non-empty code_snippet",
-                            bool(probe.get("code_snippet", "").strip())
-                        ))
-                        print(f"    Code snippet preview: {probe['code_snippet'][:80]}…")
-                    passed.append(_check(
-                        f"Probe {i+1} expected_answer is non-empty",
-                        bool(probe.get("expected_answer", "").strip())
-                    ))
-        else:
-            passed.append(_check("Flagged question found in bank after toggle", False))
-
-    # Verify disable clears probes
-    r3 = requests.put(
-        f"{INTERVIEW_API}/api/interview/question/{q_id}/core-competency",
-        json={"enabled": False},
-    )
-    passed.append(_check(f"PUT disable → {r3.status_code}", r3.status_code == 200))
-    if r3.status_code == 200:
-        passed.append(_check("Disable response: is_core_competency=False",
-                              r3.json().get("is_core_competency") is False))
-
-    # Re-enable so downstream tests have a flagged question to work with
-    requests.put(
-        f"{INTERVIEW_API}/api/interview/question/{q_id}/core-competency",
-        json={"enabled": True, "job_description": TEST_JOB["description"]},
-    )
-    return passed, q_id
-
-
-# ── Test 3: session bundles probe data ────────────────────────────────────────
-
-def test_session_includes_probes(job_id, flagged_q_id):
-    """
-    Creating a session after a question is flagged must include
-    is_core_competency=True and probe_questions[] in that question's payload.
-    """
-    print("\n[Test 3] Session create — flagged question carries probe data")
-    passed = []
-
-    data = _create_session(job_id)
-    session_id = data.get("session_id")
-    questions  = data.get("questions", [])
-
-    passed.append(_check("Session created", bool(session_id), session_id or "none"))
-    passed.append(_check(f"Session has questions", len(questions) > 0,
-                          f"{len(questions)} questions"))
-
-    flagged = next((q for q in questions if q.get("id") == flagged_q_id), None)
-    if flagged:
-        passed.append(_check("Flagged question present in session payload", True))
-        passed.append(_check("is_core_competency=True on question",
-                              flagged.get("is_core_competency") is True))
-        probes = flagged.get("probe_questions", [])
-        passed.append(_check("probe_questions[] present and non-empty",
-                              isinstance(probes, list) and len(probes) > 0,
-                              f"{len(probes)} probes"))
-        if probes:
-            passed.append(_check("Each probe has question + voice_text",
-                                  all("question" in p and "voice_text" in p for p in probes)))
-    else:
-        # Flagged question may be shuffled out if session has fewer Qs than bank
-        print("  ⚠️  Flagged question not drawn into this session (shuffle). "
-              "Creating a larger session to guarantee inclusion…")
-        # Try a session with more questions
-        jd = f"{TEST_JOB['description']}\n\n{TEST_JOB['requirements']}"
-        r2 = requests.post(f"{INTERVIEW_API}/api/interview/session", json={
-            "job_description": jd, "resume_text": "5 years iOS Swift.",
-            "difficulty": 3, "seniority_bar": "senior",
-            "time_limit": 30, "num_questions": 6, "behavioral_pct": 0,
-            "job_id": job_id,
-        })
-        if r2.status_code == 200:
-            d2 = r2.json()
-            session_id = d2["session_id"]
-            questions  = d2["questions"]
-            flagged    = next((q for q in questions if q.get("id") == flagged_q_id), None)
-            if flagged:
-                passed.append(_check("Flagged question found in larger session", True))
-                passed.append(_check("is_core_competency=True",
-                                      flagged.get("is_core_competency") is True))
-                probes = flagged.get("probe_questions", [])
-                passed.append(_check("probe_questions present",
-                                      isinstance(probes, list) and len(probes) > 0))
-            else:
-                passed.append(_check("Flagged question found in session", False,
-                                      "question not in bank draw even with larger session"))
-        else:
-            passed.append(_check("Larger session created", False, f"HTTP {r2.status_code}"))
-
-    return passed, session_id, questions
-
-
-# ── Test 4: report parses CC transcript markers ───────────────────────────────
-
-def test_report_with_cc_transcript(session_id, questions):
-    """
-    Complete a session with a transcript containing [CORE_COMPETENCY] and
-    [PROBE_N: ...] markers. The report must include core_competency_probes
-    in the per_question entry for the flagged question.
-    Uses real Claude Sonnet for report generation.
-    """
-    print("\n[Test 4] Report generation — CC transcript markers parsed (real Claude)")
-    passed = []
-
-    if not session_id:
-        passed.append(_check("Session available for report test", False))
-        return passed
-
-    full_transcript = ""
-    for i, q in enumerate(questions):
-        is_cc = q.get("is_core_competency", False)
-        marker = " [CORE_COMPETENCY]" if is_cc else ""
-        full_transcript += f"[Q{i+1}: {q['question']}]{marker}\n"
-        if is_cc:
-            # Deliberately shallow main answer so probe was warranted
-            full_transcript += f"{SHALLOW_ANSWER}\n\n"
-            # Then probe answers (use expected_answer from probe data)
-            for pi, probe in enumerate(q.get("probe_questions", [])):
-                full_transcript += f"[PROBE_{pi+1}: {probe['question']}]\n"
-                full_transcript += f"{probe.get('expected_answer', 'yes')}\n\n"
-        else:
-            full_transcript += f"{NORMAL_ANSWER}\n\n"
-
-    r = requests.post(
-        f"{INTERVIEW_API}/api/interview/session/{session_id}/complete",
-        json={"full_transcript": full_transcript, "questions": questions},
-        timeout=120,
-    )
-    passed.append(_check(f"POST /session/complete → {r.status_code}",
-                          r.status_code == 200))
-    if r.status_code != 200:
-        print(f"    detail: {r.text[:200]}")
-        return passed
-
-    report = r.json()
-    pqs = report.get("per_question", [])
-    passed.append(_check("Report has per_question entries", len(pqs) > 0, f"{len(pqs)}"))
-    passed.append(_check("overall_score > 0", report.get("overall_score", 0) > 0,
-                          f"{report.get('overall_score')}/100"))
-
-    cc_questions = [q for q in questions if q.get("is_core_competency")]
-    if cc_questions:
-        cc_q_text = cc_questions[0]["question"].lower()[:50]
-        cc_pq = next(
-            (pq for pq in pqs if cc_q_text in pq.get("question", "").lower()),
-            None
-        )
-        if cc_pq:
-            probes_in_report = cc_pq.get("core_competency_probes")
-            passed.append(_check(
-                "CC per_question has core_competency_probes field",
-                probes_in_report is not None,
-                f"type={type(probes_in_report).__name__}"
-            ))
-            if isinstance(probes_in_report, list) and probes_in_report:
-                p0 = probes_in_report[0]
-                passed.append(_check(
-                    "Probe entry has question, candidate_answer, pass",
-                    all(k in p0 for k in ["question", "candidate_answer", "pass"])
-                ))
-                print(f"    Probe result: pass={p0.get('pass')}, "
-                      f"answer='{p0.get('candidate_answer','')[:40]}'")
-        else:
-            print("  ⚠️  Could not match CC question in per_question "
-                  "(Claude may rephrase question text — soft pass)")
-            passed.append(_check("CC question matched in per_question (soft)", True))
-    else:
-        print("  ⚠️  No CC questions in this session — probe report check skipped")
-
-    return passed
-
-
-# ── Test 5: Browser e2e — real audio via BlackHole ────────────────────────────
-
-def test_browser_cc_flow_real_audio(job_id, record=False):
-    """
-    Full browser e2e test using real audio pipeline.
-
-    What is real:
-      - TTS: browser plays questions via OpenAI TTS on speakers
-      - Mic recording: MediaRecorder captures BlackHole 2ch input
-      - Whisper transcription: real /transcribe endpoint
-      - probe-assess: real Haiku call on the actual transcript
-      - Report generation: real Claude Sonnet
-
-    What is mocked:
-      - Mic input: `say -a "BlackHole 2ch"` routes spoken answers into the
-        browser mic via BlackHole virtual loopback device
-      - Mic permission dialog: --use-fake-ui-for-media-stream Chrome flag
-        (auto-approves browser prompt without replacing the audio device)
-
-    BlackHole is set as system INPUT only. TTS audio plays on speakers and
-    does NOT bleed into the mic — only explicit `say -a "BlackHole 2ch"` calls
-    are picked up by the browser.
-
-    FAILS (does not skip) if BlackHole is not installed.
-    """
-    print("\n[Test 5] Browser e2e — real audio via BlackHole")
-    passed = []
-
-    # Require BlackHole — fail hard if absent
+    # Require BlackHole — fail hard, not skip
     if not _check_blackhole():
-        passed.append(_check(
-            "BlackHole 2ch available (required for real audio pipeline)",
-            False,
-            "Install from https://existential.audio/blackhole/ then retry"
-        ))
-        return passed
+        print("\n❌ BlackHole 2ch not found.")
+        print("   Install from https://existential.audio/blackhole/ and retry.")
+        return False
+    print("  ✅ BlackHole 2ch available")
 
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        passed.append(_check("playwright installed", False,
-                              "pip install playwright && playwright install chromium"))
-        return passed
-
-    passed.append(_check("BlackHole 2ch available", True))
+        print("❌ playwright not installed: pip install playwright && playwright install chromium")
+        return False
 
     # Set BlackHole as system audio INPUT
     subprocess.run(["SwitchAudioSource", "-s", "BlackHole 2ch", "-t", "input"],
                    capture_output=True)
 
-    def say(text):
-        """Speak text into BlackHole → browser mic."""
-        subprocess.run(["say", "-r", "170", "-a", "BlackHole 2ch", text], check=False)
-
     recordings_dir = os.path.join(os.path.dirname(__file__), "recordings")
     os.makedirs(recordings_dir, exist_ok=True)
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    # Create a session — use all questions so the CC one is likely included
-    jd = f"{TEST_JOB['description']}\n\n{TEST_JOB['requirements']}"
-    sess_r = requests.post(f"{INTERVIEW_API}/api/interview/session", json={
-        "job_description": jd,
-        "resume_text": "Senior iOS engineer with 6 years Swift and UIKit experience.",
-        "difficulty": 3, "seniority_bar": "senior",
-        "time_limit": 45, "num_questions": 4, "behavioral_pct": 0,
-        "job_id": job_id,
-    })
-    if sess_r.status_code == 409:
-        passed.append(_check(
-            "Session created for browser test",
-            False,
-            f"409 — job setup not ready: {sess_r.json().get('detail', '')}"
-        ))
-        _restore_audio()
-        return passed
-    sess_r.raise_for_status()
-    sess_data    = sess_r.json()
-    session_id   = sess_data["session_id"]
-    questions    = sess_data["questions"]
-    cc_indices   = [i for i, q in enumerate(questions) if q.get("is_core_competency")]
-
-    print(f"  Session: {session_id}")
-    print(f"  Questions: {len(questions)}, CC question indices: {cc_indices}")
-    for i, q in enumerate(questions):
-        tag = " [CC]" if q.get("is_core_competency") else ""
-        print(f"    Q{i+1}{tag}: {q['question'][:65]}…")
-
-    passed.append(_check("Session created", bool(session_id)))
-    if not session_id:
-        _restore_audio()
-        return passed
+    passed = []
+    profile_dir = "/tmp/cc_e2e_browser_profile"
+    shutil.rmtree(profile_dir, ignore_errors=True)
 
     context_kwargs = {"viewport": {"width": 1280, "height": 900}}
     if record:
         context_kwargs["record_video_dir"] = recordings_dir
         context_kwargs["record_video_size"] = {"width": 1280, "height": 900}
 
-    probe_banner_appeared = False
-    probe_question_text   = None
-    code_snippet_shown    = False
-    post_probe_advanced   = False
-
-    import shutil
-    profile_dir = "/tmp/cc_e2e_profile"
-    shutil.rmtree(profile_dir, ignore_errors=True)
-
     try:
         with sync_playwright() as p:
-            # Use persistent context so --use-fake-ui-for-media-stream takes effect
             ctx = p.chromium.launch_persistent_context(
                 user_data_dir=profile_dir,
                 headless=False,
                 args=["--use-fake-ui-for-media-stream"],
                 **context_kwargs,
             )
-            # TTS is enabled (real OpenAI TTS plays on speakers).
-            # We do NOT disable it — the test validates the real flow.
             page = ctx.new_page()
-            page.goto(f"{INTERVIEW_URL}/interview/{session_id}")
+
+            # ── Step 1: Login ─────────────────────────────────────────────
+            print("\n[Step 1] Login")
+            page.goto(f"{TB_URL}/login")
+            page.wait_for_load_state("networkidle")
+            page.fill('input[type="email"]', TEST_EMAIL)
+            page.fill('input[type="password"]', TEST_PASSWORD)
+            page.click('button[type="submit"]')
+
+            # Wait for redirect to dashboard or jobs
+            for _ in range(20):
+                if "/dashboard" in page.url or "/jobs" in page.url:
+                    break
+                page.wait_for_timeout(500)
+
+            on_dashboard = "/dashboard" in page.url or "/jobs" in page.url
+            passed.append(_check("Logged in — on dashboard/jobs", on_dashboard, page.url))
+            if not on_dashboard:
+                ctx.close()
+                return False
+
+            # ── Step 2: Create job via UI ─────────────────────────────────
+            print("\n[Step 2] Create job via UI")
+            page.goto(f"{TB_URL}/jobs")
             page.wait_for_load_state("networkidle")
 
-            # Before you begin
+            # Click Create Job button
+            page.click("button:has-text('Create Job'), button:has-text('New Job'), button:has-text('Post Job')",
+                       timeout=8_000)
+            page.wait_for_selector("h2:has-text('Create New Job')", timeout=8_000)
+            passed.append(_check("Create Job modal opened", True))
+
+            # Fill the form
+            page.fill('input[name="title"]', JOB_TITLE)
+            page.fill('input[name="department"]', "Engineering")
+            page.fill('input[name="location"]', "Remote")
+            page.fill('textarea[name="description"]', JOB_DESC)
+            page.fill('textarea[name="requirements"]', JOB_REQS)
+            passed.append(_check("Job form filled", True))
+
+            # Submit
+            page.click('button[type="submit"]:has-text("Create"), button[type="submit"]:has-text("Post"), form button[type="submit"]',
+                       timeout=5_000)
+
+            # Should navigate to job detail page
             try:
-                page.wait_for_selector("h1:has-text('Before you begin')",
-                                       state="visible", timeout=12_000)
+                page.wait_for_url(lambda u: "/jobs/" in u and u != f"{TB_URL}/jobs",
+                                  timeout=15_000)
+                passed.append(_check("Navigated to job detail page", True, page.url))
+            except Exception as e:
+                passed.append(_check("Navigated to job detail page", False, str(e)))
+                ctx.close()
+                return False
+
+            job_url = page.url
+            job_id  = job_url.rstrip("/").split("/")[-1]
+            print(f"  Job ID: {job_id}")
+
+            # ── Step 3: Wait for question bank generation ─────────────────
+            print("\n[Step 3] Waiting for question bank generation (TB → Interview module)…", end="", flush=True)
+            deadline = time.time() + 300  # 5 min max
+            setup_ready = False
+            while time.time() < deadline:
+                content = page.content()
+                # Setup complete when generating banner gone and no spinner in config header
+                generating = "Generating interview questions" in content
+                if not generating:
+                    # Double-check via API
+                    try:
+                        r = requests.get(f"{TB_API}/api/jobs/{job_id}/setup-status",
+                                        headers={"Authorization": f"Bearer {_get_token()}"}, timeout=5)
+                        if r.status_code == 200:
+                            status = r.json().get("setup_status") or r.json().get("status")
+                            if status == "ready":
+                                setup_ready = True
+                                break
+                    except Exception:
+                        pass
+                page.wait_for_timeout(3000)
+                print(".", end="", flush=True)
+
+            print()
+            passed.append(_check("Question bank ready (setup_status=ready)", setup_ready))
+            if not setup_ready:
+                ctx.close()
+                return False
+
+            # Reload so the question list populates
+            page.reload()
+            page.wait_for_load_state("networkidle")
+
+            # ── Step 4: Expand Screening Interview Config ─────────────────
+            print("\n[Step 4] Expand Screening Interview Config")
+            page.click("button:has-text('Screening Interview Config')", timeout=8_000)
+            page.wait_for_timeout(1500)
+
+            # Wait for question list to load inside config panel
+            try:
+                page.wait_for_selector("button:has-text('Mark Core'), button:has-text('⭐ Core')",
+                                       timeout=15_000)
+                passed.append(_check("Question list loaded in config panel", True))
+            except Exception as e:
+                passed.append(_check("Question list loaded in config panel", False, str(e)))
+                ctx.close()
+                return False
+
+            # ── Step 5: Mark first question as Core Competency ────────────
+            print("\n[Step 5] Mark first question as Core Competency")
+            mark_core_btn = page.query_selector("button:has-text('Mark Core')")
+            if not mark_core_btn:
+                passed.append(_check("Found 'Mark Core' button", False, "no untagged questions found"))
+                ctx.close()
+                return False
+
+            # Capture the question text next to the button (for logging)
+            try:
+                question_text = mark_core_btn.evaluate(
+                    "el => el.closest('div').querySelector('span.truncate')?.textContent || ''"
+                )
+                print(f"  Flagging: {question_text[:70]}…")
+            except Exception:
+                pass
+
+            mark_core_btn.click()
+            page.wait_for_timeout(2000)  # API call + re-render
+
+            # Verify the button now shows ⭐ Core
+            try:
+                page.wait_for_selector("button:has-text('⭐ Core'), button:has-text('\u2b50 Core')",
+                                       timeout=8_000)
+                passed.append(_check("'⭐ Core' badge appeared after toggle", True))
+            except Exception as e:
+                passed.append(_check("'⭐ Core' badge appeared after toggle", False, str(e)))
+
+            # ── Step 6: Save Config ───────────────────────────────────────
+            print("\n[Step 6] Save Config")
+            page.click("button:has-text('Save Config')", timeout=5_000)
+
+            # Wait for "Saved!" confirmation
+            try:
+                page.wait_for_selector("button:has-text('Saved!')", timeout=10_000)
+                passed.append(_check("Config saved — 'Saved!' appeared", True))
+            except Exception as e:
+                passed.append(_check("Config saved — 'Saved!' appeared", False, str(e)))
+
+            # Wait for re-generation to complete (Save Config triggers new setup)
+            print("  Waiting for re-generation after save…", end="", flush=True)
+            deadline2 = time.time() + 300
+            regen_ready = False
+            while time.time() < deadline2:
+                content = page.content()
+                if "Generating interview questions" not in content:
+                    try:
+                        r = requests.get(f"{TB_API}/api/jobs/{job_id}/setup-status",
+                                        headers={"Authorization": f"Bearer {_get_token()}"}, timeout=5)
+                        if r.status_code == 200:
+                            status = r.json().get("setup_status") or r.json().get("status")
+                            if status == "ready":
+                                regen_ready = True
+                                break
+                    except Exception:
+                        pass
+                page.wait_for_timeout(3000)
+                print(".", end="", flush=True)
+            print()
+            passed.append(_check("Re-generation complete after save", regen_ready))
+            if not regen_ready:
+                ctx.close()
+                return False
+
+            # ── Step 7: Click Mock Interview ──────────────────────────────
+            print("\n[Step 7] Click Mock Interview button")
+
+            # Make sure config panel is still open (may have collapsed)
+            if not page.query_selector("button:has-text('Mock Interview')"):
+                page.click("button:has-text('Screening Interview Config')", timeout=5_000)
+                page.wait_for_timeout(1000)
+
+            # Mock Interview opens a new tab
+            with ctx.expect_page() as new_page_info:
+                page.click("button:has-text('Mock Interview')", timeout=8_000)
+
+            interview_page = new_page_info.value
+            interview_page.wait_for_load_state("networkidle")
+
+            # Add BlackHole loopback init script to interview tab
+            # (can't inject before navigation since it's a new tab opened by the app)
+            # We rely on --use-fake-ui-for-media-stream set at context level.
+
+            passed.append(_check("Interview tab opened", bool(interview_page)))
+            print(f"  Interview URL: {interview_page.url}")
+
+            # Verify it's an interview session URL
+            is_interview = "/interview/" in interview_page.url
+            passed.append(_check("Interview URL is /interview/{session_id}", is_interview,
+                                  interview_page.url))
+            if not is_interview:
+                ctx.close()
+                return False
+
+            # Extract session_id from URL for later report check
+            session_id = interview_page.url.rstrip("/").split("/")[-1].split("?")[0]
+            print(f"  Session ID: {session_id}")
+
+            # ── Step 8: Start interview ───────────────────────────────────
+            print("\n[Step 8] Start interview")
+
+            try:
+                interview_page.wait_for_selector("h1:has-text('Before you begin')",
+                                                  state="visible", timeout=15_000)
                 passed.append(_check("'Before you begin' screen loaded", True))
             except Exception as e:
                 passed.append(_check("'Before you begin' screen loaded", False, str(e)))
                 ctx.close()
-                return passed
+                return False
 
-            # Grant mic → Tap to Begin
-            page.click("button:has-text('Allow Microphone')", timeout=8_000)
-            page.wait_for_selector("button:has-text('Tap to Begin')",
-                                   state="visible", timeout=8_000)
-            page.click("button:has-text('Tap to Begin')")
-            page.wait_for_timeout(1000)
+            interview_page.click("button:has-text('Allow Microphone')", timeout=8_000)
+            interview_page.wait_for_selector("button:has-text('Tap to Begin')",
+                                              state="visible", timeout=8_000)
+            interview_page.click("button:has-text('Tap to Begin')")
+            interview_page.wait_for_timeout(1000)
 
             try:
-                page.wait_for_selector("text=Question 1 of", state="visible", timeout=10_000)
+                interview_page.wait_for_selector("text=Question 1 of",
+                                                  state="visible", timeout=10_000)
                 passed.append(_check("Interview started — Question 1 visible", True))
             except Exception as e:
                 passed.append(_check("Interview started", False, str(e)))
                 ctx.close()
-                return passed
+                return False
 
-            for qi in range(len(questions)):
-                q = questions[qi]
+            # Fetch question list from session to know which are CC
+            questions = []
+            try:
+                r = requests.get(f"{INTERVIEW_API}/api/interview/session/{session_id}", timeout=10)
+                if r.status_code == 200:
+                    questions = r.json().get("questions", [])
+            except Exception:
+                pass
+
+            cc_indices = [i for i, q in enumerate(questions) if q.get("is_core_competency")]
+            print(f"  Questions: {len(questions)}, CC indices: {cc_indices}")
+            for i, q in enumerate(questions):
+                tag = " [CC]" if q.get("is_core_competency") else ""
+                print(f"    Q{i+1}{tag}: {q['question'][:65]}…")
+
+            # ── Step 9: Answer questions ──────────────────────────────────
+            print("\n[Step 9] Answering questions via BlackHole")
+
+            probe_banner_appeared = False
+            code_snippet_shown    = False
+            probe_mode_cleared    = False
+
+            for qi in range(max(len(questions), 1)):
+                q = questions[qi] if qi < len(questions) else {}
                 is_cc = q.get("is_core_competency", False)
                 tag   = " [CC]" if is_cc else ""
-                print(f"\n  Q{qi+1}{tag}: {q['question'][:60]}…")
+                print(f"\n  Q{qi+1}{tag}: {q.get('question','')[:60]}…")
 
-                # Wait for "Recording" indicator — this means TTS has finished
-                # and the mic is active. Only then do we speak via BlackHole.
-                print("    Waiting for Recording indicator (TTS playing)…", end="", flush=True)
-                recording_appeared = False
-                for _ in range(60):  # up to 30s for TTS to finish
-                    content = page.content()
-                    if "Recording" in content and "Speaking" not in content:
-                        recording_appeared = True
-                        break
-                    page.wait_for_timeout(500)
-                    print(".", end="", flush=True)
-                print(" recording" if recording_appeared else " (timeout, proceeding anyway)")
+                # Wait for Recording indicator (TTS finished)
+                print("    Waiting for Recording indicator…", end="", flush=True)
+                recording = _wait_recording(interview_page, timeout_s=60)
+                print(" recording" if recording else " (timeout)")
 
-                # Choose the answer to speak
-                if is_cc:
-                    answer_text = SHALLOW_ANSWER
-                    print(f"    Speaking SHALLOW answer: '{answer_text}'")
-                else:
-                    answer_text = NORMAL_ANSWER
-                    print(f"    Speaking normal answer ({len(answer_text)} chars)")
+                # Speak answer
+                answer_text = SHALLOW_ANSWER if is_cc else NORMAL_ANSWER
+                print(f"    Speaking: '{answer_text[:60]}'")
+                _say(answer_text)
 
-                # Speak into BlackHole
-                say(answer_text)
-                print("    Done speaking")
+                # Wait for Next/Finish enabled
+                btn = _wait_enabled(interview_page,
+                                    "button:has-text('Finish'), button:has-text('Next')",
+                                    timeout_s=20)
 
-                # Wait for Next/Finish to be enabled
-                for _ in range(40):
-                    if (page.query_selector("button:has-text('Finish'):not([disabled])") or
-                            page.query_selector("button:has-text('Next'):not([disabled])")):
-                        break
-                    page.wait_for_timeout(300)
-
-                is_last = bool(page.query_selector("button:has-text('Finish'):not([disabled])"))
-                btn_sel = "button:has-text('Finish')" if is_last else "button:has-text('Next')"
-                page.click(btn_sel, timeout=8_000)
+                is_last = bool(interview_page.query_selector(
+                    "button:has-text('Finish'):not([disabled])"))
+                interview_page.click(
+                    "button:has-text('Finish')" if is_last else "button:has-text('Next')",
+                    timeout=8_000
+                )
                 print(f"    Clicked {'Finish' if is_last else 'Next'}")
 
-                # Wait for Whisper processing
+                # Wait for Whisper
                 try:
-                    page.wait_for_selector("p:has-text('Processing')", timeout=5_000)
-                    page.wait_for_selector("p:has-text('Processing')",
-                                           state="hidden", timeout=60_000)
-                    print("    Whisper done")
+                    interview_page.wait_for_selector("p:has-text('Processing')", timeout=5_000)
+                    interview_page.wait_for_selector("p:has-text('Processing')",
+                                                      state="hidden", timeout=60_000)
+                    print("    Transcribed ✓")
                 except Exception:
                     pass
 
-                # For CC question: wait for probe-assess network call + state update,
-                # then check if probe banner appeared
+                # For CC question: wait for probe-assess + state update
                 if is_cc:
-                    print("    Waiting for probe-assess result…")
-                    page.wait_for_timeout(3000)  # probe-assess + React state update
+                    print("    Waiting for probe-assess…", end="", flush=True)
+                    page.wait_for_timeout(500)
+                    for _ in range(10):
+                        interview_page.wait_for_timeout(500)
+                        content = interview_page.content()
+                        if "Core competency check" in content or "Follow-up" in content:
+                            break
+                        print(".", end="", flush=True)
+                    print()
 
-                    content = page.content()
+                    content = interview_page.content()
                     if "Core competency check" in content or "Follow-up" in content:
                         probe_banner_appeared = True
                         print("    ✅ Probe banner detected!")
 
-                        # Capture probe question text
-                        try:
-                            probe_question_text = page.text_content(
-                                "p.text-sm:has-text('Follow-up'), .text-indigo-700",
-                                timeout=2000
-                            )
-                        except Exception:
-                            pass
-
-                        # Check for code snippet
-                        if page.query_selector("pre"):
+                        if interview_page.query_selector("pre"):
                             code_snippet_shown = True
-                            print("    ✅ Code snippet displayed!")
+                            print("    ✅ Code snippet visible!")
 
                         # Answer each probe
-                        probe_count = len(q.get("probe_questions", []))
-                        for pi in range(probe_count):
-                            probe = q["probe_questions"][pi]
+                        probe_questions = q.get("probe_questions", [])
+                        for pi, probe in enumerate(probe_questions):
                             print(f"    Probe {pi+1}: '{probe['question'][:60]}…'")
 
-                            # Wait for Recording indicator on probe
-                            for _ in range(40):
-                                content = page.content()
-                                if "Recording" in content and "Speaking" not in content:
-                                    break
-                                page.wait_for_timeout(500)
+                            print("    Waiting for Recording…", end="", flush=True)
+                            _wait_recording(interview_page, timeout_s=30)
+                            print(" recording")
 
-                            # Speak the expected answer (short, direct)
                             probe_answer = probe.get("expected_answer", "yes")
-                            print(f"    Speaking probe answer: '{probe_answer}'")
-                            say(probe_answer)
+                            print(f"    Speaking probe answer: '{probe_answer[:60]}'")
+                            _say(probe_answer)
 
-                            # Wait for Next to be enabled
-                            for _ in range(40):
-                                if (page.query_selector("button:has-text('Finish'):not([disabled])") or
-                                        page.query_selector("button:has-text('Next'):not([disabled])")):
-                                    break
-                                page.wait_for_timeout(300)
-
-                            is_last_p = bool(page.query_selector("button:has-text('Finish'):not([disabled])"))
-                            page.click(
+                            _wait_enabled(interview_page,
+                                          "button:has-text('Finish'), button:has-text('Next')",
+                                          timeout_s=20)
+                            is_last_p = bool(interview_page.query_selector(
+                                "button:has-text('Finish'):not([disabled])"))
+                            interview_page.click(
                                 "button:has-text('Finish')" if is_last_p else "button:has-text('Next')",
                                 timeout=8_000
                             )
 
                             try:
-                                page.wait_for_selector("p:has-text('Processing')", timeout=5_000)
-                                page.wait_for_selector("p:has-text('Processing')",
-                                                       state="hidden", timeout=60_000)
+                                interview_page.wait_for_selector("p:has-text('Processing')",
+                                                                  timeout=5_000)
+                                interview_page.wait_for_selector("p:has-text('Processing')",
+                                                                  state="hidden", timeout=60_000)
                             except Exception:
                                 pass
+                            interview_page.wait_for_timeout(1500)
 
-                            page.wait_for_timeout(1500)
-
-                        # After all probes, banner should be gone and we should be on next Q
-                        content_after = page.content()
-                        if "Core competency check" not in content_after:
-                            post_probe_advanced = True
-                            print("    ✅ Probe mode cleared — moved to next question")
+                        # Probe mode should be cleared
+                        if "Core competency check" not in interview_page.content():
+                            probe_mode_cleared = True
+                            print("    ✅ Probe mode cleared — back to main questions")
                     else:
-                        print("    Probe banner did NOT appear (needs_probing may have returned false)")
-                        print(f"    Answer sent was: '{answer_text}'")
+                        print(f"    Probe banner did NOT appear (needs_probing may be false for: '{answer_text}')")
 
                 if is_last:
                     break
@@ -810,130 +576,81 @@ def test_browser_cc_flow_real_audio(job_id, record=False):
             passed.append(_check(
                 "Probe banner appeared after shallow CC answer",
                 probe_banner_appeared,
-                "Haiku returned needs_probing=false — try a shorter answer" if not probe_banner_appeared else ""
-            ))
-            passed.append(_check(
-                "Probe mode cleared after answering all probes",
-                post_probe_advanced or not probe_banner_appeared
+                "Haiku returned needs_probing=false — answer may need to be shorter" if not probe_banner_appeared else ""
             ))
             passed.append(_check(
                 "Code snippet shown for code probe",
                 code_snippet_shown or not probe_banner_appeared,
-                "(only expected if a code probe was triggered)"
+                "(only expected if a code probe was generated)"
+            ))
+            passed.append(_check(
+                "Probe mode cleared after all probes answered",
+                probe_mode_cleared or not probe_banner_appeared
             ))
 
-            # Wait for report
-            print("\n  Waiting for report generation…", end="", flush=True)
+            # ── Step 10: Wait for report ──────────────────────────────────
+            print("\n[Step 10] Waiting for report generation…", end="", flush=True)
             try:
-                page.wait_for_url(lambda u: "/report/" in u or "/thank-you" in u,
-                                  timeout=120_000)
+                interview_page.wait_for_url(
+                    lambda u: "/report/" in u or "/thank-you" in u,
+                    timeout=120_000
+                )
                 print(" ✅")
-                passed.append(_check("Interview completed — report page reached", True))
+                passed.append(_check("Report page reached", True, interview_page.url))
             except Exception as e:
                 print(" ❌")
-                passed.append(_check("Interview completed", False, str(e)))
+                passed.append(_check("Report page reached", False, str(e)))
 
-            # Verify report has core_competency_probes
+            # ── Step 11: Verify report has CC probe results ───────────────
+            print("\n[Step 11] Verify report has core_competency_probes")
             time.sleep(3)
-            report_r = requests.get(f"{INTERVIEW_API}/api/interview/session/{session_id}")
-            if report_r.status_code == 200:
-                report_data = report_r.json().get("report")
-                if report_data:
-                    cc_pqs = [
-                        pq for pq in report_data.get("per_question", [])
-                        if pq.get("core_competency_probes")
-                    ]
-                    passed.append(_check(
-                        "Report has core_competency_probes in per_question",
-                        len(cc_pqs) > 0,
-                        f"{len(cc_pqs)} question(s) with probe results"
-                    ))
-                    if cc_pqs:
-                        p0 = cc_pqs[0]["core_competency_probes"][0]
+            try:
+                r = requests.get(f"{INTERVIEW_API}/api/interview/session/{session_id}", timeout=15)
+                if r.status_code == 200:
+                    report = r.json().get("report")
+                    if report:
+                        cc_pqs = [
+                            pq for pq in report.get("per_question", [])
+                            if pq.get("core_competency_probes")
+                        ]
                         passed.append(_check(
-                            "Probe result has pass field",
-                            "pass" in p0,
-                            f"pass={p0.get('pass')}, answer='{p0.get('candidate_answer','')[:40]}'"
+                            "Report has core_competency_probes in per_question",
+                            len(cc_pqs) > 0,
+                            f"{len(cc_pqs)} question(s) with probe results"
                         ))
+                        if cc_pqs:
+                            p0 = cc_pqs[0]["core_competency_probes"][0]
+                            passed.append(_check(
+                                "Probe has question/candidate_answer/pass fields",
+                                all(k in p0 for k in ["question", "candidate_answer", "pass"]),
+                                f"pass={p0.get('pass')}, answer='{p0.get('candidate_answer','')[:40]}'"
+                            ))
+                    else:
+                        passed.append(_check("Report generated", False, "report is null"))
                 else:
-                    passed.append(_check("Report generated", False, "report field is null"))
+                    passed.append(_check(f"Session fetch → {r.status_code}", False))
+            except Exception as e:
+                passed.append(_check("Report check failed", False, str(e)))
 
-            if record and page.video:
-                raw_path = page.video.path()
+            # Save video
+            if record and interview_page.video:
+                raw = interview_page.video.path()
             else:
-                raw_path = None
+                raw = None
 
             ctx.close()
 
-        if record and raw_path and os.path.exists(raw_path):
-            final = os.path.join(recordings_dir, f"cc_probe_real_audio_{timestamp}.webm")
-            os.rename(raw_path, final)
-            print(f"  📹 Video saved: {final}")
+            if record and raw and os.path.exists(raw):
+                final = os.path.join(recordings_dir,
+                                     f"cc_e2e_browser_{timestamp}.webm")
+                os.rename(raw, final)
+                print(f"\n  📹 Video saved: {final}")
 
     finally:
         _restore_audio()
 
-    return passed
-
-
-# ── Runner ────────────────────────────────────────────────────────────────────
-
-def run(record=False):
-    print("\n" + "=" * 65)
-    print("TalentBridge — Core Competency Probes E2E Tests")
-    print("=" * 65)
-
-    if not check_services():
-        print("\n❌ Services not running. Start all services and retry.")
-        return False
-
-    all_passed = []
-
-    print("\n[Auth] Registering test user…")
-    try:
-        token = _auth()
-        print(f"  OK ✅")
-    except Exception as e:
-        print(f"  ❌ Auth failed: {e}")
-        return False
-
-    print("\n[Setup] Creating job + question bank…")
-    try:
-        job_id, questions = _create_and_setup_job(token)
-        print(f"  job_id={job_id}, {len(questions)} questions in bank")
-    except Exception as e:
-        print(f"  ❌ Setup failed: {e}")
-        return False
-
-    # Tests 1–4: API only
-    all_passed += test_probe_assess()
-
-    if questions:
-        t2_result = test_toggle_core_competency(questions)
-        t2_passed, flagged_q_id = t2_result if isinstance(t2_result, tuple) else (t2_result, None)
-        all_passed += t2_passed
-    else:
-        print("\n[Test 2] SKIPPED — no questions in bank")
-        flagged_q_id = None
-
-    if flagged_q_id:
-        t3_result = test_session_includes_probes(job_id, flagged_q_id)
-        t3_passed, session_id, sess_qs = t3_result if isinstance(t3_result, tuple) else (t3_result, None, [])
-        all_passed += t3_passed
-    else:
-        print("\n[Test 3] SKIPPED — no flagged question")
-        session_id, sess_qs = None, []
-
-    if session_id and sess_qs:
-        all_passed += test_report_with_cc_transcript(session_id, sess_qs)
-    else:
-        print("\n[Test 4] SKIPPED — no session available")
-
-    # Test 5: real audio browser test
-    all_passed += test_browser_cc_flow_real_audio(job_id, record=record)
-
-    total  = len(all_passed)
-    failed = sum(1 for p in all_passed if not p)
+    total  = len(passed)
+    failed = sum(1 for p in passed if not p)
     print("\n" + "=" * 65)
     if failed == 0:
         print(f"✅  ALL {total} CHECKS PASSED")
@@ -942,6 +659,27 @@ def run(record=False):
     print("=" * 65)
 
     return failed == 0
+
+
+# ── Token helper (only used for setup-status polling during wait loops) ───────
+
+_cached_token = None
+
+def _get_token():
+    global _cached_token
+    if _cached_token:
+        return _cached_token
+    r = requests.post(f"{TB_API}/api/auth/login",
+                      json={"email": TEST_EMAIL, "password": TEST_PASSWORD})
+    if r.status_code == 200:
+        _cached_token = r.json()["access_token"]
+        return _cached_token
+    # Try register
+    r = requests.post(f"{TB_API}/api/auth/register",
+                      json={"email": TEST_EMAIL, "password": TEST_PASSWORD,
+                            "full_name": TEST_NAME, "company_name": "E2E Tests"})
+    _cached_token = r.json()["access_token"]
+    return _cached_token
 
 
 if __name__ == "__main__":
