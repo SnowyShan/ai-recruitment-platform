@@ -715,34 +715,39 @@ def run(record=False):
 
             # ── Step 11: Verify report has CC probe results ───────────────
             print("\n[Step 11] Verify report has core_competency_probes")
-            time.sleep(3)
-            try:
-                r = requests.get(f"{INTERVIEW_API}/api/interview/session/{session_id}", timeout=15)
-                if r.status_code == 200:
-                    report = r.json().get("report")
-                    if report:
-                        cc_pqs = [
-                            pq for pq in report.get("per_question", [])
-                            if pq.get("core_competency_probes")
-                        ]
-                        passed.append(_check(
-                            "Report has core_competency_probes in per_question",
-                            len(cc_pqs) > 0,
-                            f"{len(cc_pqs)} question(s) with probe results"
-                        ))
-                        if cc_pqs:
-                            p0 = cc_pqs[0]["core_competency_probes"][0]
-                            passed.append(_check(
-                                "Probe has question/candidate_answer/pass fields",
-                                all(k in p0 for k in ["question", "candidate_answer", "pass"]),
-                                f"pass={p0.get('pass')}, answer='{p0.get('candidate_answer','')[:40]}'"
-                            ))
-                    else:
-                        passed.append(_check("Report generated", False, "report is null"))
-                else:
-                    passed.append(_check(f"Session fetch → {r.status_code}", False))
-            except Exception as e:
-                passed.append(_check("Report check failed", False, str(e)))
+            # Poll until report is populated (Claude Sonnet may take 15-30s)
+            print("  Polling for report…", end="", flush=True)
+            report_data = None
+            for _ in range(30):
+                time.sleep(3)
+                try:
+                    r = requests.get(f"{INTERVIEW_API}/api/interview/session/{session_id}", timeout=15)
+                    if r.status_code == 200 and r.json().get("report"):
+                        report_data = r.json().get("report")
+                        break
+                except Exception:
+                    pass
+                print(".", end="", flush=True)
+            print()
+            if report_data:
+                cc_pqs = [
+                    pq for pq in report_data.get("per_question", [])
+                    if pq.get("core_competency_probes")
+                ]
+                passed.append(_check(
+                    "Report has core_competency_probes in per_question",
+                    len(cc_pqs) > 0,
+                    f"{len(cc_pqs)} question(s) with probe results"
+                ))
+                if cc_pqs:
+                    p0 = cc_pqs[0]["core_competency_probes"][0]
+                    passed.append(_check(
+                        "Probe has question/candidate_answer/pass fields",
+                        all(k in p0 for k in ["question", "candidate_answer", "pass"]),
+                        f"pass={p0.get('pass')}, answer='{p0.get('candidate_answer','')[:40]}'"
+                    ))
+            else:
+                passed.append(_check("Report generated within timeout", False, "report still null after 90s"))
 
             # Save video
             if record and interview_page.video:
