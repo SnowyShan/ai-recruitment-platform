@@ -376,23 +376,31 @@ def run(record=False):
             # No lottery, no polling needed.
             print("\n[Step 5] Set 1 question / 0% behavioral and Save Config")
 
-            def _set_react_input(el, value):
+            def _set_react_val(el_handle, value):
                 page.evaluate("""([el, v]) => {
                     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
                     setter.call(el, v);
                     el.dispatchEvent(new Event('input', { bubbles: true }));
                     el.dispatchEvent(new Event('change', { bubbles: true }));
-                }""", [el, value])
+                }""", [el_handle, value])
 
-            # num_questions — first number input in the panel
-            num_inputs = page.query_selector_all('input[type="number"]')
-            if num_inputs:
-                _set_react_input(num_inputs[0], "1")
-
-            # behavioral_pct — range slider, set to 0
+            # Set behavioral_pct=0 FIRST (range slider), then num_questions=1.
+            # Order matters: behavioral is capped at Math.max(1, round(n * pct/100)).
+            # With pct=0, that becomes Math.max(1, 0) = 1... but the component
+            # uses behavioral_pct directly in the hint display, and pct=0 makes
+            # num_behavioral=0 in create_session. So pct=0 first, then n=1 → 1 technical.
             range_inputs = page.query_selector_all('input[type="range"]')
             if range_inputs:
-                _set_react_input(range_inputs[0], "0")
+                _set_react_val(range_inputs[0], "0")
+                page.wait_for_timeout(200)
+
+            # Number inputs: [0]=duration, [1]=num_questions
+            num_inputs = page.locator('input[type="number"]')
+            _set_react_val(num_inputs.nth(1).element_handle(), "1")
+            page.wait_for_timeout(200)
+
+            hint = page.locator("p.text-xs.text-slate-400").first.text_content()
+            print(f"  Config: {hint.strip()}")
 
             page.wait_for_timeout(300)
             page.click("button:has-text('Save Config')", timeout=5_000)
@@ -639,14 +647,15 @@ def run(record=False):
                         probe_banner_appeared = True
                         print("    ✅ Probe banner detected!")
 
-                        if interview_page.query_selector("pre"):
-                            code_snippet_shown = True
-                            print("    ✅ Code snippet visible!")
-
                         # Answer each probe
                         probe_questions = q.get("probe_questions", [])
                         for pi, probe in enumerate(probe_questions):
                             print(f"    Probe {pi+1}: '{probe['question'][:60]}…'")
+
+                            # Check for code snippet on this probe
+                            if interview_page.query_selector("pre"):
+                                code_snippet_shown = True
+                                print("    ✅ Code snippet visible!")
 
                             print("    Waiting for Recording…", end="", flush=True)
                             _wait_recording(interview_page, timeout_s=30)
@@ -690,10 +699,16 @@ def run(record=False):
                 probe_banner_appeared,
                 "Haiku returned needs_probing=false — answer may need to be shorter" if not probe_banner_appeared else ""
             ))
+            # Code snippet: only required if at least one code probe exists in the session
+            has_code_probe = any(
+                p.get("presentation_mode") == "code"
+                for q in questions if q.get("is_core_competency")
+                for p in q.get("probe_questions", [])
+            )
             passed.append(_check(
                 "Code snippet shown for code probe",
-                code_snippet_shown or not probe_banner_appeared,
-                "(only expected if a code probe was generated)"
+                code_snippet_shown or not has_code_probe or not probe_banner_appeared,
+                "(no code probe in this session)" if not has_code_probe else ""
             ))
             passed.append(_check(
                 "Probe mode cleared after all probes answered",
