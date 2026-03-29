@@ -406,15 +406,19 @@ def scenario_a_regular_skip(p, record, recordings_dir, timestamp):
         except Exception as e:
             passed.append(_check("A: Advanced to Q2 after skip", False, str(e)))
 
-        # Answer Q2 and Q3 normally then finish
-        for qi in [2, 3]:
+        # Answer remaining questions normally then finish
+        for _ in range(5):  # max remaining questions
+            if "/report/" in interview_page.url or "/thank-you" in interview_page.url:
+                break
             _wait_recording(interview_page, timeout_s=30)
             _say(NORMAL_ANSWER)
-            _wait_enabled(interview_page, "button:has-text('Finish'), button:has-text('Next')", timeout_s=20)
+            _wait_enabled(interview_page, "button:has-text('Finish'), button:has-text('Next →')", timeout_s=20)
             is_last = bool(interview_page.query_selector("button:has-text('Finish'):not([disabled])"))
-            interview_page.click("button:has-text('Finish')" if is_last else "button:has-text('Next')", timeout=5_000)
+            interview_page.click("button:has-text('Finish')" if is_last else "button:has-text('Next →')", timeout=8_000)
             _wait_transcribing(interview_page)
             interview_page.wait_for_timeout(500)
+            if is_last:
+                break
 
         # Wait for report
         try:
@@ -461,8 +465,8 @@ def scenario_b_regular_end(p, record, recordings_dir, timestamp):
         # Answer Q1
         _wait_recording(interview_page, timeout_s=60)
         _say(NORMAL_ANSWER)
-        _wait_enabled(interview_page, "button:has-text('Next')", timeout_s=20)
-        interview_page.click("button:has-text('Next')", timeout=5_000)
+        _wait_enabled(interview_page, "button:has-text('Next →')", timeout_s=20)
+        interview_page.click("button:has-text('Next →')", timeout=5_000)
         _wait_transcribing(interview_page)
 
         # On Q2 — tap End instead of answering
@@ -517,7 +521,7 @@ def scenario_c_probe_skip(p, record, recordings_dir, timestamp):
         # Answer shallowly to trigger probes
         _wait_recording(interview_page, timeout_s=60)
         _say(SHALLOW_ANSWER)
-        _wait_enabled(interview_page, "button:has-text('Finish'), button:has-text('Next')", timeout_s=20)
+        _wait_enabled(interview_page, "button:has-text('Finish'), button:has-text('Next →')", timeout_s=20)
         interview_page.click("button:has-text('Finish')", timeout=5_000)
         _wait_transcribing(interview_page)
 
@@ -547,7 +551,7 @@ def scenario_c_probe_skip(p, record, recordings_dir, timestamp):
                 # Answer probe 2 normally to complete
                 _wait_recording(interview_page, timeout_s=30)
                 _say(NORMAL_ANSWER)
-                _wait_enabled(interview_page, "button:has-text('Finish'), button:has-text('Next')", timeout_s=20)
+                _wait_enabled(interview_page, "button:has-text('Finish'), button:has-text('Next →')", timeout_s=20)
                 interview_page.click("button:has-text('Finish')", timeout=5_000)
                 _wait_transcribing(interview_page)
         else:
@@ -603,7 +607,7 @@ def scenario_d_probe_end(p, record, recordings_dir, timestamp):
         # Shallow answer → probe fires
         _wait_recording(interview_page, timeout_s=60)
         _say(SHALLOW_ANSWER)
-        _wait_enabled(interview_page, "button:has-text('Finish'), button:has-text('Next')", timeout_s=20)
+        _wait_enabled(interview_page, "button:has-text('Finish'), button:has-text('Next →')", timeout_s=20)
         interview_page.click("button:has-text('Finish')", timeout=5_000)
         _wait_transcribing(interview_page)
 
