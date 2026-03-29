@@ -346,6 +346,20 @@ def toggle_core_competency(question_id: str, req: CoreCompetencyToggle):
 
     if req.enabled:
         probes = ai.generate_probes(row["question"], row["topic"] or "", req.job_description)
+
+        # Generate TTS audio for each probe upfront — same pattern as job setup.
+        # Store audio_path on each probe so the frontend plays pre-generated audio
+        # instead of calling on-demand TTS when the probe appears on screen.
+        for i, probe in enumerate(probes):
+            tts_text = probe.get("voice_text") or probe.get("question", "")
+            if tts_text:
+                probe_audio_filename = f"probe_{question_id}_{i}.mp3"
+                probe_audio_path = os.path.join(AUDIO_DIR, probe_audio_filename)
+                tts_ok = ai.generate_and_store_tts(tts_text, probe_audio_path)
+                probe["audio_path"] = probe_audio_filename if tts_ok else None
+            else:
+                probe["audio_path"] = None
+
         conn.execute(
             "UPDATE questions SET is_core_competency=1, probe_questions=? WHERE id=?",
             (json.dumps(probes), question_id)
@@ -508,7 +522,15 @@ def create_session(req: SessionCreate):
             q = dict(row)
             q["type"] = "technical"
             q["is_core_competency"] = bool(row["is_core_competency"]) if "is_core_competency" in row.keys() else False
-            q["probe_questions"] = json.loads(row["probe_questions"]) if row["probe_questions"] else []
+            probes = json.loads(row["probe_questions"]) if row["probe_questions"] else []
+            # Resolve audio_path → audio_url for each probe so the frontend can
+            # play pre-generated audio without any on-demand TTS calls.
+            for probe in probes:
+                if probe.get("audio_path"):
+                    probe["audio_url"] = f"/audio/{probe['audio_path']}"
+                else:
+                    probe["audio_url"] = None
+            q["probe_questions"] = probes
             q["audio_url"] = f"/audio/{q['audio_path']}" if q.get("audio_path") else None
             q["video_url"] = f"/video/{q['video_path']}" if q.get("video_path") else None
             technical_qs.append(q)

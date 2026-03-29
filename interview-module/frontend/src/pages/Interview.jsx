@@ -507,12 +507,52 @@ export default function Interview() {
 
   // ── Core competency probe helpers ──────────────────────────────────────────
 
-  const speakProbeQuestion = useCallback((probe, questionIndex) => {
+  const speakProbeQuestion = useCallback((probe, _questionIndex) => {
     cancelSpeech()
-    if (probe.presentation_mode === 'code') {
-      setActiveTab(t => ({ ...t, [questionIndex]: 'code' }))
+    // Never switch tabs for probe questions — candidate always answers verbally.
+    // Code snippets are rendered inline in the probe banner, not in the code tab.
+    if (probe.audio_url) {
+      // Play pre-generated audio (same pattern as regular questions)
+      ttsGenRef.current += 1
+      const gen = ttsGenRef.current
+      axios.get(`${API}${probe.audio_url}`, { responseType: 'blob' })
+        .then(res => {
+          if (ttsGenRef.current !== gen || finishedRef.current) return
+          const blobUrl = URL.createObjectURL(res.data)
+          const audio = new Audio(blobUrl)
+          audioRef.current = audio
+          const done = () => {
+            audio.onended = null
+            audio.onerror = null
+            URL.revokeObjectURL(blobUrl)
+            audioRef.current = null
+            setIsSpeaking(false)
+            if (ttsGenRef.current === gen && !finishedRef.current) {
+              setTimeout(() => {
+                if (ttsGenRef.current === gen && !finishedRef.current) startRecording()
+              }, 300)
+            }
+          }
+          audio.onended = done
+          audio.onerror = done
+          audio.play()
+            .then(() => { if (ttsGenRef.current === gen) setIsSpeaking(true) })
+            .catch(() => {
+              URL.revokeObjectURL(blobUrl)
+              audioRef.current = null
+              setIsSpeaking(false)
+              if (ttsGenRef.current === gen && !finishedRef.current) startRecording()
+            })
+        })
+        .catch(() => {
+          // Fallback to on-demand TTS if pre-generated audio fetch fails
+          speakThenRecord(probe.voice_text || probe.question)
+        })
+    } else {
+      // No pre-generated audio — fall back to on-demand TTS
+      speakThenRecord(probe.voice_text || probe.question)
     }
-    speakThenRecord(probe.voice_text || probe.question)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [speakThenRecord])
 
   const nextProbe = useCallback(async () => {
@@ -532,7 +572,6 @@ export default function Interview() {
     if (nextProbeIdx >= ps.probes.length) {
       probePhaseRef.current = null
       setProbePhase(null)
-      setActiveTab(t => ({ ...t, [idx]: 'voice' }))
       advance()
     } else {
       const updatedState = { ...ps, probeIndex: nextProbeIdx }
