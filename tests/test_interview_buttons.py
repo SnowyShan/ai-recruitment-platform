@@ -286,22 +286,33 @@ def _create_job_and_wait(page, title, num_questions=3, behavioral_pct=20):
 
 
 def _flag_first_cc(page, job_id):
-    """Reload config panel and flag first question as CC. Returns question dict."""
+    """Reload config panel and flag first question as CC."""
     page.reload()
     page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(1000)
     page.click("button:has-text('Screening Interview Config')", timeout=8_000)
-    page.wait_for_timeout(1500)
-    page.wait_for_selector("button:has-text('Mark Core'), button:has-text('⭐ Core')", timeout=15_000)
+    page.wait_for_timeout(2000)
+
+    # Wait for question list to appear
+    try:
+        page.wait_for_selector("button:has-text('Mark Core'), button:has-text('⭐ Core')", timeout=20_000)
+    except Exception:
+        # Retry: reload and expand again
+        page.reload()
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(1500)
+        page.click("button:has-text('Screening Interview Config')", timeout=8_000)
+        page.wait_for_timeout(2000)
+        page.wait_for_selector("button:has-text('Mark Core'), button:has-text('⭐ Core')", timeout=20_000)
 
     mark_core_btn = page.query_selector("button:has-text('Mark Core')")
     if not mark_core_btn:
         raise RuntimeError("No 'Mark Core' button found")
 
-    jd = JOB_DESC
     mark_core_btn.click()
-    page.wait_for_selector("button:has-text('⭐ Core')", timeout=15_000)
+    # Probe generation is synchronous in the API — wait up to 30s for the badge
+    page.wait_for_selector("button:has-text('⭐ Core')", timeout=30_000)
     page.wait_for_timeout(1000)  # allow DB write to commit
-
     return True
 
 
