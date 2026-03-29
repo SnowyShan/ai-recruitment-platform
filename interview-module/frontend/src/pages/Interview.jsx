@@ -904,6 +904,8 @@ export default function Interview() {
             </button>
           </div>
         </div>
+        {/* data-probe-active is a hidden test hook — not visible to candidates */}
+        {probePhase && <span data-probe-active="true" style={{display:'none'}} />}
         <p className="text-base sm:text-lg font-medium text-slate-800 leading-relaxed">
           {probePhase
             ? (probePhase.probes[probePhase.probeIndex]?.question || '').split(/```/)[0].trim()

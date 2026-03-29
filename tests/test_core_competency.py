@@ -71,7 +71,7 @@ JOB_DESC  = (
 JOB_REQS  = "5+ years iOS. Expert Swift, UIKit, SwiftUI, ARC, Instruments."
 
 # Deliberately shallow — one sentence. Haiku must return needs_probing=true.
-SHALLOW_ANSWER = "ARC manages memory automatically."
+SHALLOW_ANSWER = "I don't know."
 
 # Normal answer for non-CC questions.
 NORMAL_ANSWER = (
@@ -636,14 +636,12 @@ def run(record=False):
                     page.wait_for_timeout(500)
                     for _ in range(10):
                         interview_page.wait_for_timeout(500)
-                        content = interview_page.content()
-                        if "Core competency check" in content or "Follow-up" in content:
+                        if interview_page.query_selector("[data-probe-active]"):
                             break
                         print(".", end="", flush=True)
                     print()
 
-                    content = interview_page.content()
-                    if "Core competency check" in content or "Follow-up" in content:
+                    if interview_page.query_selector("[data-probe-active]"):
                         probe_banner_appeared = True
                         print("    ✅ Probe banner detected!")
 
@@ -685,7 +683,7 @@ def run(record=False):
                             interview_page.wait_for_timeout(1500)
 
                         # Probe mode should be cleared
-                        if "Core competency check" not in interview_page.content():
+                        if not interview_page.query_selector("[data-probe-active]"):
                             probe_mode_cleared = True
                             print("    ✅ Probe mode cleared — back to main questions")
                     else:
