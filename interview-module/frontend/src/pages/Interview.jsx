@@ -904,18 +904,13 @@ export default function Interview() {
             </button>
           </div>
         </div>
-        {probePhase && (
-          <div className="mb-3 px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-lg text-xs text-indigo-700 font-medium">
-            Follow-up {probePhase.probeIndex + 1} of {probePhase.probes.length} — Core competency check
-          </div>
-        )}
         <p className="text-base sm:text-lg font-medium text-slate-800 leading-relaxed">
           {probePhase
-            ? probePhase.probes[probePhase.probeIndex]?.question
+            ? (probePhase.probes[probePhase.probeIndex]?.question || '').split(/```/)[0].trim()
             : q.question
           }
         </p>
-        {probePhase && probePhase.probes[probePhase.probeIndex]?.presentation_mode === 'code' && (
+        {probePhase && probePhase.probes[probePhase.probeIndex]?.code_snippet && (
           <pre className="mt-3 p-3 bg-slate-900 text-green-300 rounded-lg text-xs overflow-x-auto font-mono whitespace-pre-wrap">
             {probePhase.probes[probePhase.probeIndex].code_snippet}
           </pre>
