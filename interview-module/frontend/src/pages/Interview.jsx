@@ -644,14 +644,41 @@ export default function Interview() {
     cancelSpeech()
     const idx = currentIndexRef.current
     await stopRecording()  // discard audio
-    transcriptsRef.current[idx] = '[SKIPPED]'
-    advance()
+
+    if (probePhaseRef.current) {
+      // Skipping a probe — record [SKIPPED] for this probe answer, then advance
+      // through probe state exactly as nextProbe would (without transcribing).
+      const ps = probePhaseRef.current
+      if (!probeTranscriptsRef.current[idx]) probeTranscriptsRef.current[idx] = []
+      probeTranscriptsRef.current[idx].push('[SKIPPED]')
+
+      const nextProbeIdx = ps.probeIndex + 1
+      if (nextProbeIdx >= ps.probes.length) {
+        // All probes done — exit probe mode and advance to next main question
+        probePhaseRef.current = null
+        setProbePhase(null)
+        advance()
+      } else {
+        // Move to next probe
+        const updatedState = { ...ps, probeIndex: nextProbeIdx }
+        probePhaseRef.current = updatedState
+        setProbePhase({ ...updatedState })
+        speakProbeQuestion(ps.probes[nextProbeIdx], idx)
+      }
+    } else {
+      // Regular skip — unchanged behaviour
+      transcriptsRef.current[idx] = '[SKIPPED]'
+      advance()
+    }
   }
 
   const finish = useCallback(async () => {
     finishedRef.current = true
     clearInterval(timerRef.current)
     cancelSpeech()
+    // Clear probe state — End was tapped mid-probe; we exit cleanly
+    probePhaseRef.current = null
+    setProbePhase(null)
     const idx = currentIndexRef.current
 
     // Only transcribe if this question hasn't already been handled.
@@ -1028,7 +1055,10 @@ export default function Interview() {
       <div className="flex gap-2 sm:gap-3 mt-2">
         <button onClick={nextQuestion} disabled={isTranscribing || isSpeaking}
           className="btn btn-primary flex-1 text-sm sm:text-base py-3 disabled:opacity-50">
-          {currentIndex + 1 >= questions.length ? 'Finish' : 'Next →'}
+          {probePhase
+            ? (probePhase.probeIndex + 1 >= probePhase.probes.length && currentIndex + 1 >= questions.length ? 'Finish' : 'Next →')
+            : (currentIndex + 1 >= questions.length ? 'Finish' : 'Next →')
+          }
         </button>
         <button onClick={skip} disabled={isTranscribing || isSpeaking}
           className="btn btn-secondary px-4 sm:px-5 text-sm py-3 disabled:opacity-50">
