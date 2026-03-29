@@ -82,10 +82,23 @@ export default function Interview() {
   const camVideoRef = useRef(null)             // hidden <video> element for face-api
   const snapshotCanvasRef = useRef(null)       // hidden <canvas> for JPEG capture
   const faceApiLoadedRef = useRef(false)
+  const previewVideoRef = useRef(null)       // camera preview on identity photo screen
+  const identityDescriptorRef = useRef(null)    // Float32Array from identity photo
+  const lastMismatchLoggedRef = useRef(0)        // timestamp of last face_mismatch log
   const snapshotTimerRef = useRef(null)
   const faceCheckTimerRef = useRef(null)
   const [camReady, setCamReady] = useState(false)
   const [identityPhotoCaptured, setIdentityPhotoCaptured] = useState(false)
+  const [proctoringError, setProctoringError] = useState(null)
+
+  // Face detection stats
+  const faceDetectionRunsRef = useRef(0)
+  const faceDetectedCountRef = useRef(0)
+  const faceAbsentCountRef = useRef(0)
+  const multipleFacesCountRef = useRef(0)
+  const faceMismatchCountRef = useRef(0)
+  const faceCheckRunsRef = useRef(0)
+  const faceMatchCountRef = useRef(0)
 
   const [searchParams] = useSearchParams()
   const [tokenError, setTokenError] = useState(null)
@@ -142,6 +155,7 @@ export default function Interview() {
   //   'ready'    → mic granted/denied, "Start Interview" button shown, Q0 audio pre-fetching
   //   'started'  → interview running
   const [introPhase, setIntroPhase] = useState('intro')
+  const [startingInterview, setStartingInterview] = useState(false)
   const micReady  = introPhase === 'started'
   const started   = introPhase === 'started'
 
@@ -170,37 +184,48 @@ export default function Interview() {
         proctoringSnapshotsRef.current.push(dataUrl)
       }
     } catch (_) {}
-  }, [])
+  }, [_logProctoringEvent])
 
-  // Load face-api.js models from CDN, run face detection every 5s
+  // Start face detection interval every 5s (models already loaded in handleGrantMic)
   const _startFaceDetection = useCallback(async () => {
-    if (faceApiLoadedRef.current) return
+    if (!faceApiLoadedRef.current || !window.faceapi) return
+    const faceapi = window.faceapi
     try {
-      // Dynamically load face-api.js from CDN
-      if (!window.faceapi) {
-        await new Promise((resolve, reject) => {
-          const script = document.createElement('script')
-          script.src = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js'
-          script.onload = resolve
-          script.onerror = reject
-          document.head.appendChild(script)
-        })
-      }
-      const faceapi = window.faceapi
-      const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model'
-      await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL)
-      faceApiLoadedRef.current = true
-
+      // Give the video a moment to reach readyState >= 2 before starting checks
+      await new Promise(r => setTimeout(r, 500))
       faceCheckTimerRef.current = setInterval(async () => {
         const video = camVideoRef.current
         if (!video || video.readyState < 2 || finishedRef.current) return
         try {
+          faceDetectionRunsRef.current++
           const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
           const count = detections.length
           if (count === 0) {
+            faceAbsentCountRef.current++
             _logProctoringEvent('face_absent', 'No face detected in camera frame')
           } else if (count > 1) {
+            multipleFacesCountRef.current++
             _logProctoringEvent('multiple_faces', `${count} faces detected`)
+          } else {
+            faceDetectedCountRef.current++
+          }
+          // Identity matching on live video — only when exactly 1 face and descriptor available
+          if (count === 1 && identityDescriptorRef.current && faceapi.nets.faceRecognitionNet?.params) {
+            faceCheckRunsRef.current++
+            const det = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor()
+            if (det) {
+              const distance = faceapi.euclideanDistance(identityDescriptorRef.current, det.descriptor)
+              if (distance <= 0.6) {
+                faceMatchCountRef.current++
+              } else {
+                faceMismatchCountRef.current++
+                const now = Date.now()
+                if (now - lastMismatchLoggedRef.current > 30000) {
+                  lastMismatchLoggedRef.current = now
+                  _logProctoringEvent('face_mismatch', `Identity mismatch in live feed (distance: ${distance.toFixed(2)})`)
+                }
+              }
+            }
           }
         } catch (_) {}
       }, 5000)
@@ -216,18 +241,58 @@ export default function Interview() {
       const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true })
       micStreamRef.current = audioStream
 
-      // Camera for proctoring — separate stream, non-blocking
+      // Camera for proctoring — mandatory
       try {
         const camStream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240, facingMode: 'user' } })
         camStreamRef.current = camStream
         setCamReady(true)
       } catch (_) {
-        // Camera denied — proctoring degrades gracefully (no face detection, no snapshots)
         _logProctoringEvent('camera_denied', 'Candidate denied camera access')
+        setProctoringError("Camera access is required for this interview. Please allow camera access and reload the page.")
+        setIntroPhase('ready')
+        return
+      }
+
+      // Load face-api.js + models inline — mandatory for proctoring
+      try {
+        if (!window.faceapi) {
+          await new Promise((resolve, reject) => {
+            const script = document.createElement('script')
+            script.src = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js'
+            script.onload = resolve
+            script.onerror = reject
+            document.head.appendChild(script)
+          })
+        }
+        const faceapi = window.faceapi
+        const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model'
+        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL)
+        await Promise.all([
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+        ])
+        faceApiLoadedRef.current = true
+      } catch (_) {
+        setProctoringError("Face verification could not be initialized. Please use a supported browser (Chrome, Edge, or Safari) and ensure you have an active internet connection.")
+        setIntroPhase('ready')
+        return
       }
     } catch (_) {}
     setIntroPhase('ready')
   }
+
+  // Start face detection AFTER interview DOM is committed (introPhase === 'started')
+  // This ensures camVideoRef.current points to the interview's video element, not the intro's
+  useEffect(() => {
+    if (introPhase !== 'started') return
+    // Re-wire camera stream to the newly mounted video element
+    if (camVideoRef.current && camStreamRef.current) {
+      camVideoRef.current.srcObject = camStreamRef.current
+      camVideoRef.current.play().catch(() => {})
+    }
+    _startFaceDetection()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [introPhase])
 
   // Wire camera stream to hidden video element once camReady
   useEffect(() => {
@@ -241,6 +306,30 @@ export default function Interview() {
     }, 200)
     return () => clearTimeout(t)
   }, [camReady])
+
+  // Extract identity descriptor once identity photo is captured
+  useEffect(() => {
+    if (!identityPhotoCaptured || !identityPhotoRef.current) return
+    if (!window.faceapi?.nets?.faceRecognitionNet?.params) return // recognition model not loaded
+    const faceapi = window.faceapi
+    const img = new Image()
+    img.onload = async () => {
+      try {
+        const c = document.createElement('canvas')
+        c.width = img.width; c.height = img.height
+        c.getContext('2d').drawImage(img, 0, 0)
+        const det = await faceapi.detectSingleFace(c, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor()
+        if (det) {
+          identityDescriptorRef.current = det.descriptor
+        } else {
+          console.warn('[Proctoring] No face detected in identity photo — matching disabled')
+        }
+      } catch (e) {
+        console.warn('[Proctoring] Identity descriptor extraction failed:', e.message)
+      }
+    }
+    img.src = identityPhotoRef.current
+  }, [identityPhotoCaptured])
 
   // Release mic + camera streams on unmount, clear timers
   useEffect(() => {
@@ -304,6 +393,9 @@ export default function Interview() {
 
   // "Start Interview" tap — this IS the user gesture that unlocks iOS audio autoplay
   const handleStart = () => {
+    setStartingInterview(true)
+    // Let React render the spinner first, then do the heavy work
+    setTimeout(() => {
     setIntroPhase('started')
 
     // ── Proctoring: start when interview begins ────────────────────────────
@@ -338,8 +430,7 @@ export default function Interview() {
       if (!finishedRef.current) _captureSnapshot()
     }, 2 * 60 * 1000)
 
-    // 5. Start face detection
-    _startFaceDetection()
+    }, 50) // defer heavy work so spinner renders first
   }
 
   // Validate invite token if present
@@ -896,6 +987,15 @@ export default function Interview() {
       events: proctoringEventsRef.current,
       snapshots: proctoringSnapshotsRef.current,
       identity_photo: identityPhotoRef.current,
+      face_detection_stats: {
+        total_runs: faceDetectionRunsRef.current,
+        face_detected: faceDetectedCountRef.current,
+        face_absent: faceAbsentCountRef.current,
+        multiple_faces: multipleFacesCountRef.current,
+        identity_check_runs: faceCheckRunsRef.current,
+        identity_match: faceMatchCountRef.current,
+        identity_mismatch: faceMismatchCountRef.current,
+      }
     }
 
     try {
@@ -948,6 +1048,9 @@ export default function Interview() {
     const minutes = Math.round((state?.timeLimit || 45))
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
+        {/* Hidden proctoring elements — must be mounted early so refs are available when stream wires up */}
+        <video ref={camVideoRef} playsInline muted style={{ display: 'none' }} />
+        <canvas ref={snapshotCanvasRef} style={{ display: 'none' }} />
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 max-w-md w-full p-8 flex flex-col gap-6">
           <div>
             <p className="text-blue-600 text-sm font-medium mb-1">AI Screening Interview</p>
@@ -981,17 +1084,31 @@ export default function Interview() {
             Best experienced on Chrome, Edge, or Safari on macOS.
           </p>
 
+          {proctoringError && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex flex-col gap-3">
+              <p className="text-sm text-red-700">{proctoringError}</p>
+              <button
+                onClick={() => window.location.reload()}
+                className="bg-red-600 hover:bg-red-700 text-white font-semibold px-5 py-2.5 rounded-xl text-sm shadow-sm active:scale-95 transition-transform"
+              >
+                Reload Page
+              </button>
+            </div>
+          )}
+
           {/* Identity photo capture — shown after mic+camera granted */}
-          {introPhase === 'ready' && camReady && !identityPhotoCaptured && (
+          {!proctoringError && introPhase === 'ready' && camReady && !identityPhotoCaptured && (
             <div className="flex flex-col items-center gap-3">
               <p className="text-sm text-slate-600 text-center">Please look at the camera and take a quick photo to verify your identity.</p>
               <div className="relative w-48 h-36 rounded-xl overflow-hidden bg-slate-100 border border-slate-200">
                 <video
                   ref={el => {
-                    // Wire the cam stream to this preview video element
-                    if (el && camStreamRef.current) {
-                      el.srcObject = camStreamRef.current
-                      el.play().catch(() => {})
+                    if (el && previewVideoRef.current !== el) {
+                      previewVideoRef.current = el
+                      if (camStreamRef.current && !el.srcObject) {
+                        el.srcObject = camStreamRef.current
+                        el.play().catch(() => {})
+                      }
                     }
                   }}
                   playsInline muted
@@ -1000,10 +1117,10 @@ export default function Interview() {
               </div>
               <button
                 onClick={() => {
-                  // Capture identity photo from cam stream
+                  // Capture identity photo from the dedicated preview video ref
+                  const vidEl = previewVideoRef.current
                   const canvas = snapshotCanvasRef.current || document.createElement('canvas')
-                  const vidEl = document.querySelector('video[muted][playsinline]:not([style*="display: none"])')
-                  if (vidEl) {
+                  if (vidEl && vidEl.readyState >= 2) {
                     canvas.width = 320; canvas.height = 240
                     canvas.getContext('2d').drawImage(vidEl, 0, 0, 320, 240)
                     identityPhotoRef.current = canvas.toDataURL('image/jpeg', 0.8)
@@ -1017,13 +1134,13 @@ export default function Interview() {
             </div>
           )}
 
-          {introPhase === 'ready' && camReady && identityPhotoCaptured && (
+          {!proctoringError && introPhase === 'ready' && camReady && identityPhotoCaptured && (
             <div className="flex items-center gap-2 text-emerald-600 text-sm justify-center">
               <span>✓</span> Identity photo captured
             </div>
           )}
 
-          {introPhase === 'intro' && (
+          {!proctoringError && introPhase === 'intro' && (
             <button
               onClick={handleGrantMic}
               className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-4 rounded-xl text-base shadow-sm active:scale-95 transition-transform"
@@ -1032,18 +1149,22 @@ export default function Interview() {
             </button>
           )}
 
-          {introPhase === 'granting' && (
+          {!proctoringError && introPhase === 'granting' && (
             <button disabled className="bg-blue-400 text-white font-semibold px-6 py-4 rounded-xl text-base opacity-70 cursor-wait">
               Requesting access…
             </button>
           )}
 
-          {introPhase === 'ready' && (!camReady || identityPhotoCaptured) && (
+          {!proctoringError && introPhase === 'ready' && (!camReady || identityPhotoCaptured) && (
             <button
               onClick={handleStart}
-              className="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-4 rounded-xl text-base shadow-sm active:scale-95 transition-transform"
+              disabled={startingInterview}
+              className="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-4 rounded-xl text-base shadow-sm active:scale-95 transition-transform disabled:opacity-80 disabled:cursor-wait flex items-center justify-center gap-2"
             >
-              Tap to Begin →
+              {startingInterview
+                ? <><span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Starting…</>
+                : 'Tap to Begin →'
+              }
             </button>
           )}
         </div>
@@ -1072,9 +1193,9 @@ export default function Interview() {
         <div>
           <p className="text-sm font-medium text-slate-500">Question {currentIndex + 1} of {questions.length}</p>
           {/* Proctoring indicator — visible to candidate as deterrence */}
-          <span className="inline-flex items-center gap-1 text-[10px] text-slate-400 mt-0.5">
+          <span className="inline-flex items-center gap-1 text-[10px] text-slate-400 mt-0.5 font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
-            Monitored
+            ● REC  Monitored
           </span>
           {isWrapUp && (
             <p className="text-xs text-amber-600 font-medium mt-0.5">Wrap-up time — finish your thought</p>

@@ -317,15 +317,58 @@ For questions with submitted drawings:
 - Evaluate whether the drawing demonstrates understanding of the question and clear visual communication.
 - Include a "draw_analysis" field in the per_question entry with your analysis of the submitted drawing."""
 
+    ai_assist_guidelines = """
+
+AI-Assist Suspicion Detection:
+Some candidates use AI cheating tools (e.g. ParakeetAI, Interview Coder, Final Round AI) during interviews. These tools capture system audio, generate real-time AI answers, and display them as invisible overlays — they cannot be detected by browser proctoring alone. You must evaluate the transcript for behavioral signals that suggest AI assistance.
+
+Signals to look for:
+- Answers that are unusually polished and well-structured for spoken verbal responses (no filler words like "um", "uh", "you know", no self-corrections, no natural pauses or restarts)
+- Answers that cover edge cases and nuances proactively, as if reading from a written essay rather than thinking out loud
+- Perfectly uniform answer length and depth across all questions, including behavioral ones (genuine candidates vary significantly)
+- Technical answers that feel like textbook definitions — correct but impersonal, with no reference to personal experience, specific projects, or anecdotes
+- Zero hesitation on hard questions that would cause even strong candidates to think before answering
+- Answers that start immediately with a perfectly organized structure (e.g. "There are three main points: first... second... third...") without any warm-up
+
+Important context:
+- A genuinely strong candidate can have some of these traits. Do not flag someone just for being good.
+- Flag when MULTIPLE signals appear consistently across MULTIPLE questions.
+- If flagging, explain specifically which answers triggered concern and why.
+
+Add a "ai_assist_suspicion" field to "proctoring_summary":
+- "none" — no concern
+- "low" — one or two mild signals, not conclusive
+- "medium" — several consistent signals across multiple questions, warrants human review
+- "high" — strong and consistent signals across the interview; highly suspicious
+Also add "ai_assist_notes" with a brief explanation of what you observed (or "No suspicious patterns detected." if none).
+"""
+
     # Build proctoring summary for the prompt
     proctoring_section = ""
-    if proctoring_data and proctoring_data.get("events"):
-        events = proctoring_data["events"]
-        event_lines = "\n".join(
-            f"  [{e.get('ts_label','?')}] {e.get('type','?')}: {e.get('detail','')}"
-            for e in events
-        )
-        proctoring_section = f"\n\nProctoring Events (for context — do NOT penalise unless egregious):\n{event_lines}"
+    if proctoring_data:
+        events = proctoring_data.get("events", [])
+        stats = proctoring_data.get("face_detection_stats", {})
+
+        parts = []
+        if events:
+            event_lines = "\n".join(
+                f"  [{e.get('ts_label','?')}] {e.get('type','?')}: {e.get('detail','')}"
+                for e in events
+            )
+            parts.append(f"Proctoring Events:\n{event_lines}")
+
+        if stats:
+            stat_lines = (
+                f"  Face detection runs: {stats.get('total_runs', 0)}\n"
+                f"  Face present: {stats.get('face_detected', 0)}/{stats.get('total_runs', 0)}\n"
+                f"  Face absent: {stats.get('face_absent', 0)}/{stats.get('total_runs', 0)}\n"
+                f"  Multiple faces: {stats.get('multiple_faces', 0)}/{stats.get('total_runs', 0)}\n"
+                f"  Identity checks: {stats.get('identity_check_runs', 0)}, matched: {stats.get('identity_match', 0)}, mismatched: {stats.get('identity_mismatch', 0)}"
+            )
+            parts.append(f"Face Detection Stats:\n{stat_lines}")
+
+        if parts:
+            proctoring_section = "\n\nProctoring Data (for context):\n" + "\n\n".join(parts)
 
     prompt_text = f"""You are a senior technical interviewer writing a hiring evaluation report.
 
@@ -342,7 +385,7 @@ Full Interview Transcript (questions marked with [Q1:], [Q2:] etc, [SKIPPED] mea
 {full_transcript}{code_section}{draw_section}{proctoring_section}
 
 Evaluation guidelines:
-{guidelines}{code_eval_guidelines}{draw_eval_guidelines}{core_competency_guidelines}
+{guidelines}{code_eval_guidelines}{draw_eval_guidelines}{core_competency_guidelines}{ai_assist_guidelines}
 
 Return ONLY valid JSON in this exact format:
 {{
@@ -355,7 +398,9 @@ Return ONLY valid JSON in this exact format:
   "proctoring_summary": {{
     "risk_level": "low" | "medium" | "high",
     "flags": ["...", "..."],
-    "notes": "..."
+    "notes": "...",
+    "ai_assist_suspicion": "none" | "low" | "medium" | "high",
+    "ai_assist_notes": "..."
   }},
   "per_question": [
     {{
@@ -370,7 +415,7 @@ Return ONLY valid JSON in this exact format:
   ]
 }}
 Note: "code_analysis" should only be present for questions that have a non-empty code submission. "draw_analysis" should only be present for questions that have a drawing submission. Omit both for other questions.
-For "proctoring_summary": if no proctoring events were logged, set risk_level to "low", flags to [], notes to "No issues detected." Base risk_level on frequency/severity of tab switches, face absences, and multiple-face events."""
+For "proctoring_summary": if no proctoring events were logged, set risk_level to "low", flags to [], notes to "No issues detected." Base risk_level on frequency/severity of tab switches, face absences, and multiple-face events. For ai_assist_suspicion: evaluate behavioral patterns in the transcript as described above. Default to "none" if the transcript is absent or too short to evaluate."""
 
     # Build multimodal content blocks when drawings are present
     if non_empty_draws:

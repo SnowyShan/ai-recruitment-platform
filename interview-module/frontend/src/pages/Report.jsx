@@ -132,7 +132,7 @@ export default function Report() {
         </div>
 
         {/* Proctoring summary */}
-        {(report.proctoring_summary || proctoringData) && (() => {
+        {proctoringData && (() => {
           const ps = report.proctoring_summary || {}
           const risk = ps.risk_level || 'low'
           const riskColor = risk === 'high' ? 'text-red-600 bg-red-50 border-red-200'
@@ -182,6 +182,30 @@ export default function Report() {
                   </div>
                 </details>
               )}
+
+              {proctoringData?.face_detection_stats && (() => {
+                const s = proctoringData.face_detection_stats
+                const detPct = s.total_runs > 0 ? Math.round((s.face_detected / s.total_runs) * 100) : 0
+                const absPct = s.total_runs > 0 ? Math.round((s.face_absent / s.total_runs) * 100) : 0
+                const mulPct = s.total_runs > 0 ? Math.round((s.multiple_faces / s.total_runs) * 100) : 0
+                const matchPct = s.identity_check_runs > 0 ? Math.round((s.identity_match / s.identity_check_runs) * 100) : null
+                return (
+                  <div className="mb-3 p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs space-y-1">
+                    <p className="font-semibold text-slate-600 mb-2">Face Detection Stats</p>
+                    <p className="text-slate-500">Detection runs: <span className="font-mono font-semibold text-slate-700">{s.total_runs}</span></p>
+                    <p className="text-slate-500">Face present: <span className="font-mono font-semibold text-emerald-700">{detPct}%</span> ({s.face_detected}/{s.total_runs})</p>
+                    <p className="text-slate-500">Face absent: <span className={`font-mono font-semibold ${s.face_absent > 0 ? "text-red-600" : "text-slate-700"}`}>{absPct}%</span> ({s.face_absent}/{s.total_runs})</p>
+                    <p className="text-slate-500">Multiple faces: <span className={`font-mono font-semibold ${s.multiple_faces > 0 ? "text-amber-600" : "text-slate-700"}`}>{mulPct}%</span> ({s.multiple_faces}/{s.total_runs})</p>
+                    {matchPct !== null && (
+                      <>
+                        <p className="text-slate-500 mt-1">Identity checks: <span className="font-mono font-semibold text-slate-700">{s.identity_check_runs}</span></p>
+                        <p className="text-slate-500">Identity match: <span className={`font-mono font-semibold ${matchPct >= 80 ? "text-emerald-700" : "text-red-600"}`}>{matchPct}%</span></p>
+                        {s.identity_mismatch > 0 && <p className="text-slate-500">Mismatches: <span className="font-mono font-semibold text-red-600">{s.identity_mismatch}</span></p>}
+                      </>
+                    )}
+                  </div>
+                )
+              })()}
 
               {/* Snapshots grid */}
               {snapshots.length > 0 && (
