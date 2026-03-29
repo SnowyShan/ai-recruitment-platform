@@ -1,17 +1,17 @@
 # TalentBridge — Interview Module TODO
-*Last updated: March 8, 2026 (morning)*
+*Last updated: March 28, 2026*
 *Use this file to come up to speed on the project before making changes.*
 
 ---
 
 ## Project Overview
 
-TalentBridge is an AI-powered recruitment platform. The **interview module** is a standalone microservice that conducts AI-powered screening interviews with candidates via voice. It was built independently first, then integrated into TalentBridge.
+TalentBridge is an AI-powered recruitment platform. The **interview module** is a standalone microservice that conducts AI-powered screening interviews with candidates via voice. Built independently, then integrated into TalentBridge.
 
 ### Architecture (Two Services)
 
 ```
-TalentBridge (main)          Interview Module (standalone)
+TalentBridge (main)           Interview Module (standalone)
 ├── Frontend: localhost:5173  ├── Frontend: localhost:5174
 ├── Backend:  localhost:8000  └── Backend:  localhost:8001
 └── DB: talentbridge.db           └── DB: interview.db
@@ -26,19 +26,19 @@ TalentBridge (main)          Interview Module (standalone)
 6. Interview completes → interview module POSTs results back to TalentBridge (`localhost:8000/api/screenings/complete-from-interview`)
 7. Recruiter sees report in TalentBridge JobDetail page under screening history → "View Report"
 
-### Starting Both Services
+### Starting All 4 Services
 
 ```bash
-# TalentBridge backend
+# Tab 1 — TalentBridge backend (port 8000)
 cd backend && source venv/bin/activate && uvicorn app.main:app --reload --port 8000
 
-# TalentBridge frontend
+# Tab 2 — Interview backend (port 8001)
+cd interview-module/backend && source ../../backend/venv/bin/activate && uvicorn app.main:app --reload --port 8001
+
+# Tab 3 — TalentBridge frontend (port 5173)
 cd frontend && npm run dev
 
-# Interview module backend
-cd interview-module/backend && source venv/bin/activate && uvicorn app.main:app --reload --port 8001
-
-# Interview module frontend
+# Tab 4 — Interview frontend (port 5174)
 cd interview-module/frontend && npm run dev -- --port 5174
 ```
 
@@ -48,192 +48,102 @@ cd interview-module/frontend && npm run dev -- --port 5174
 
 ### MVC — All Complete
 
-- [x] **Task 1:** Question generation — Claude generates questions from resume + JD. Difficulty slider (1-5). Hardcoded question override supported. Behavioral questions derived from resume, technical from domain.
-- [x] **Task 2:** Answer evaluation — Full transcript sent to Claude at end of session (NOT per-answer). Configurable seniority bar (junior/mid/senior/staff). Hardcoded acceptable answer override supported.
-- [x] **Task 3:** Voice input — ~~Web Speech API (Chrome only)~~ → **MediaRecorder + OpenAI Whisper on all platforms** (see Recent Fixes). Questions shown one at a time. Recording starts automatically after each question's TTS audio ends. Tap Next when done — answer is transcribed and saved before advancing. One clip per question. Works on iOS (Chrome + Safari), Android Chrome, desktop Chrome/Firefox/Safari.
+- [x] **Task 1:** Question generation — Claude generates questions from resume + JD. Difficulty slider (1-5). Behavioral questions derived from resume, technical from domain.
+- [x] **Task 2:** Answer evaluation — Full transcript sent to Claude at end of session (NOT per-answer). Configurable seniority bar (junior/mid/senior/staff).
+- [x] **Task 3:** Voice input — MediaRecorder + OpenAI Whisper on all platforms. Works on iOS (Chrome + Safari), Android Chrome, desktop Chrome/Firefox/Safari.
 - [x] **Task 4:** Auto-terminate — Countdown timer. When time expires, 2-minute wrap-up window given. After wrap-up, session auto-completes.
-- [x] **Task 5:** Report generation — Full transcript + questions sent to Claude in one batch call at session end. Detailed report: per-question scores, overall pass/fail, strengths, weaknesses. Report POSTed back to TalentBridge and stored. Recruiter can view via "View Report" in JobDetail.
-- [x] **Task 6 Phase 1:** Browser TTS (speechSynthesis) — questions read aloud via `window.speechSynthesis`, mute toggle, replay button, Chrome keepalive fix, Safari restart bug fixed (keepalive disabled on non-Chrome), auto-record starts after speech ends.
-- [x] **Task 6 Phase 2:** OpenAI TTS (`tts-1`, voice `nova`) — backend `/api/interview/tts` endpoint streams audio/mpeg on demand per question. Frontend plays `<audio>` element; falls back to speechSynthesis on error. Generation counter prevents stale in-flight responses from playing after user advances. Pre-interview instructions screen handles iOS autoplay gate — Q0 audio pre-fetched while user reads instructions, plays instantly on "Start Interview" tap.
-- [x] **Task 6 Phase 3: Pre-generated audio question bank** — Backend generates TTS audio for all technical questions at job creation time (background job). New `questions` table stores question bank with `audio_path` per entry; new `job_setup` table tracks generation status per job. Interview module serves pre-built audio as static files (`/audio`). Session creation uses bank questions + freshly generated behavioral questions (resume-tailored). Frontend pre-fetches audio for all questions in parallel during "ready" phase; falls back to on-demand TTS if no pre-generated audio. On-the-fly question generation at session creation time removed — `create_session` now requires a ready `job_setup` (returns 400/409 otherwise). TalentBridge: publish and invite blocked while `setup_status='generating'`; JobDetail shows live progress bar (polls every 3s); CreateJobModal has behavioral split slider (default 20%).
-- [x] **Pre-interview instructions screen** — shows duration, question count, usage tips. "Allow Microphone & Continue" requests mic permission. "Start Interview" tap is the iOS user gesture that unlocks audio autoplay. No "Tap to Begin" needed inside the interview itself.
-- [x] **Safari/iOS compatibility** — TDZ crash fixed (declaration reorder), transcript capture race condition fixed (`questionAnswersRef` updated live on every `onresult`), production build via `npx serve` instead of vite dev server, mic permission requested upfront.
-- [x] **Mobile responsive layout** — all pages (Setup, Interview, Report, Settings, ThankYou) fully responsive.
+- [x] **Task 5:** Report generation — Full transcript + questions sent to Claude in one batch call at session end. Detailed report: per-question scores, overall pass/fail, strengths, weaknesses. Report POSTed back to TalentBridge and stored.
 
-### Integration — Complete
+### V2 — Voice Out ✅ Complete
+
+- [x] **Task 6 Phase 1:** Browser TTS (speechSynthesis) — questions read aloud, mute toggle, replay button.
+- [x] **Task 6 Phase 2:** OpenAI TTS (`tts-1`, voice `nova`) — backend `/api/interview/tts` streams audio/mpeg per question. Falls back to speechSynthesis on error.
+- [x] **Task 6 Phase 3:** Pre-generated audio question bank — TTS generated once at job creation, stored on disk, reused per candidate. Behavioral questions generated fresh per candidate (resume-tailored).
+- [x] **Task 7:** Replaced Web Speech API with MediaRecorder + OpenAI Whisper — cross-browser, server-side transcription, works on iOS/Safari/Firefox.
+
+### V3 — Natural Conversation + Follow-ups ✅ Complete
+
+- [x] **Task 8:** Natural conversational tone — small talk intro, transition phrases between questions.
+- [x] **Task 9 / Task 13 (Core Competency Probes):** When a question is flagged ⭐ Core in the question bank, the system pre-generates narrow follow-up probes. If the candidate's answer is shallow, the probe fires automatically (max 2 probes per question). Probes can include code snippets. Probe answers included in evaluation context. Full browser-driven E2E test: 20/20 checks, real BlackHole audio, Playwright, video recording.
+
+### V4 — Multimodal Input ✅ Complete
+
+- [x] **Task 10/11:** Excalidraw drawing canvas + plain code editor tab in `Interview.jsx`. Tab bar `[ Voice | Code | Draw ]`. On submit: Excalidraw JSON + PNG exported and attached to Claude evaluation context.
+
+### V5 — Video ✅ Complete
+
+- [x] **Task 12 / Task 15 (AI Video Avatar):** Recruiter video feed via D-ID (provider-swappable; HeyGen also supported). Video interview is a job-level config (off by default). When enabled, video fully replaces TTS — recruiter avatar speaks each question. Provider selector in Settings.
+
+### Infrastructure / Integration ✅ Complete
 
 - [x] TalentBridge screening flow creates interview sessions via API
 - [x] Token-based invite system (time-limited, single-use, 48hr expiry)
-- [x] Real email invites via Gmail SMTP (`talentbridgerecruiterai@gmail.com` + App Password in backend `.env`)
+- [x] Real email invites via Gmail SMTP
 - [x] Token validation on interview start
-- [x] Session marked `in_progress` when candidate starts
+- [x] Session rejoin — candidate can rejoin an `in_progress` session
 - [x] Callback to TalentBridge on completion with full report
-- [x] "View Report" button in TalentBridge JobDetail screening history
+- [x] "View Report" in TalentBridge JobDetail screening history
+- [x] Mock Interview button — recruiter can launch a test interview from JobDetail
+- [x] Question bank scoped per job (job_id filter on `/question-bank`)
+- [x] Pre-interview instructions screen
+- [x] Mobile-responsive UI (all pages)
+- [x] Safari/iOS compatibility
 
-### Settings — Complete
-- [x] Settings page in interview module frontend
-- [x] Custom evaluation prompt configurable per-deployment (stored in `interview.db`)
-- [x] Prompt injected into Claude report generation call
+### Testing ✅
 
-### Test Data — Complete
-- [x] iOS engineer test data (`testData/iOS/jd.txt` + `resume.txt`)
-- [x] Junior data scientist test data (`testData/junior-data-science/`)
-- [x] Setup page has dropdown to load test data with one click
-
-### UI Polish — Complete (unstaged, not yet committed)
-- [x] Interview page: auto-recording, wrap-up timer, clean layout
-- [x] Report page: full redesign
-- [x] Setup page: test data dropdown, difficulty slider, all config fields
-- [x] Settings page: evaluation prompt editor
-- [x] ThankYou page: shown after interview completes
-- [x] TalentBridge JobDetail: loading spinner on invite button, re-invite after completion, View Report link
+- [x] Full E2E test suite (`tests/`) — Playwright + BlackHole, real Whisper, real Claude
+- [x] Core Competency Probes E2E (`tests/test_core_competency.py`) — 20 checks, browser-driven, video recording
 
 ---
 
 ## What Is Remaining ❌
 
-### V3 — Task 7: Natural Conversation + Small Talk
+### Task 14: Basic Proctoring
 
-**What:** Interview feels like a real conversation. Light small talk at start ("Hi, how are you feeling today?"). Natural pacing between questions ("Thanks for that answer, let's move on to...").
+**What:** Detect signs of cheating or unusual conditions during the interview.
 
-**Plan:**
-- Add a "welcome" phase before questions start — Claude generates a short greeting based on candidate name + role
-- Add transition phrases between questions — can be templated, doesn't need Claude
-- File to edit: `Interview.jsx` (state machine) + `interview-module/backend/app/claude_client.py` (prompt)
-
-**Effort:** Medium — needs state machine changes in frontend
-
----
-
-### V3 — Task 9: Follow-Up Questions
-
-**What:** When an answer is too short, off-topic, or unclear, system asks a follow-up (max 1 per question).
+**Features to implement:**
+- Tab switch / window blur detection (log + flag in report)
+- Multiple faces detected via webcam (warn candidate + log)
+- Unusual audio (long silences, background voices) — flag in transcript
 
 **Plan:**
-- After candidate submits answer, send it to a lightweight Claude/Haiku call to check if it's substantive
-- If not: generate a follow-up question, display + speak it
-- Max 1 follow-up per question to avoid interrogation feel
-- File to edit: `Interview.jsx` + new backend endpoint `/api/interview/followup`
+- Frontend: `visibilitychange` + `blur` events for tab switching
+- Webcam face detection: browser-side with `face-api.js` or similar (no server round-trip)
+- Proctoring events stored on session, surfaced in evaluation report as a "Proctoring Notes" section
 
-**Effort:** Medium-high — new backend endpoint + frontend state changes
-
----
-
-### ~~V3 — Task 8 (from PRODUCT.md): Replace Web Speech API with Whisper~~ ✅ DONE
-
-**Completed March 7, 2026.** All platforms now use MediaRecorder + Whisper. See Recent Fixes below.
+**Effort:** Medium — frontend-heavy, no new backend endpoints needed except storing events
 
 ---
 
-### V4 — Task 11: Drawing Canvas (Excalidraw)
+### Task 13 (tone): Tone of Voice Analysis
 
-**What:** For system design questions, candidate can draw diagrams in addition to speaking.
+**What:** Analyse the candidate's vocal tone (confidence, hesitation, pace) as a supplementary signal alongside the transcript.
 
 **Plan:**
-- Embed Excalidraw as an optional panel alongside voice input
-- Export drawing as image/JSON at answer submission
-- Include drawing in evaluation context sent to Claude
+- Send audio clips to a tone/emotion API (e.g. Hume AI, or a self-hosted Whisper + prosody model)
+- Include tone summary as supplementary context in Claude evaluation prompt
+- NOT a primary hiring signal — clearly labelled as supplementary
 
-**Effort:** High — Excalidraw embed + backend changes to handle multimodal input
-
----
-
-### V5 — Task 12-14: Video + Tone + Proctoring
-
-**What:**
-- Task 12: WebRTC video feed capture
-- Task 13: Tone of voice analysis as supplementary signal
-- Task 14: Basic proctoring (tab switch detection, multiple faces)
-
-**Note from PRODUCT.md:** Video body language is low signal value; proctoring is the primary use case here.
-
-**Effort:** Very high — not started
-
----
-
-### Stretch — Task 15: AI Video Avatar
-
-**What:** AI video avatar (HeyGen or similar) as the interviewer instead of text on screen.
-
-**Effort:** Very high — not started
+**Effort:** High — requires audio pipeline changes and a new external API integration
 
 ---
 
 ## Known Issues / Tech Debt
 
-1. **Per-answer `/answer` endpoint exists but is unused by frontend** — frontend calls `/complete` at the end with full transcript. The `/answer` endpoint can be removed or kept for future use (e.g. follow-up logic in V3).
-
-2. ~~**Web Speech API is Chrome-only**~~ — **Resolved March 7.** All platforms now use MediaRecorder + Whisper. See Recent Fixes.
-
-3. **No candidate authentication** — invite token is the only auth mechanism. By design (see PRODUCT.md — candidate auth is out of scope for interview module, handled by TalentBridge invite link).
-
-4. **SQLite in production** — `interview.db` is fine for development. Needs PostgreSQL before real production use.
-
-5. ~~**Audio files committed to repo**~~ — **Resolved March 8.** `interview-module/backend/audio/*.mp3` added to `.gitignore`. Files purged from git history. Should still be moved to S3/CDN before production.
+1. **Per-answer `/answer` endpoint exists but is unused** — frontend calls `/complete` at end with full transcript. Can be removed.
+2. **SQLite in production** — fine for development. Needs PostgreSQL before real production use.
+3. **Audio files not in repo** — `interview-module/backend/audio/*.mp3` gitignored. Generated at runtime. Move to S3/CDN before production.
+4. **D-ID / HeyGen video** requires paid API keys — video mode is off by default; falls back gracefully to TTS when keys not configured.
 
 ---
 
-## E2E Test Infrastructure (added March 8)
+## Current State (March 28, 2026)
 
-`tests/test_e2e_interview_flow.py` — fully real end-to-end sanity test. No mocks. Covers:
-1. Auth (register or login test account)
-2. Create + publish iOS engineer job (TB API)
-3. Wait for question bank generation
-4. Create mock interview session
-5. For each question: speak a real answer via macOS `say` → real Whisper API → store transcript
-6. Submit → Claude generates report
-7. Assert: GOOD iOS answers score higher than BAD (wrong-domain) answers; gap ≥ 15 pts; all `answer_char_count > 0`
-
-```bash
-python3 tests/test_e2e_interview_flow.py           # accuracy test only
-python3 tests/test_e2e_interview_flow.py --record  # + browser video (see below)
-```
-
-**`--record` mode** — opens a real visible Chromium browser, navigates the full UI flow (login → job detail → interview → report), records it as `.webm` in `tests/recordings/`.
-
-### Audio input for `--record`: 3 options (Option 2 preferred)
-
-**Option 1 — Acoustic (no install needed)**
-- `say` speaks iOS answers through Mac speakers; built-in mic picks them up
-- Works out of the box but is susceptible to room noise and echo
-- Requires macOS to have granted Playwright's Chromium mic access in System Preferences → Privacy & Security → Microphone (first run triggers the dialog)
-
-**Option 2 — BlackHole virtual loopback ← PREFERRED**
-- `say -a "BlackHole 2ch"` routes audio digitally into the browser's mic input — no speakers, no acoustic feedback, no noise
-- Install: `brew install blackhole-2ch` (requires sudo password once)
-- After install, test auto-detects BlackHole and switches to digital loopback automatically; no code changes needed
-- **TODO: install BlackHole (`brew install blackhole-2ch`) then re-run `--record` to verify**
-
-**Option 3 — Fake mic + fake transcript (old approach, not recommended)**
-- `MockMediaRecorder` + Playwright route interception return predetermined text
-- No real audio at all — can't verify mic/Whisper pipeline is working
-- Removed in current code; only kept as fallback if Options 1+2 fail
-
-### `answer_char_count` in report
-Each per-question report entry now includes `answer_char_count` — the number of characters Whisper transcribed for that question. Populated in `routers.py` after Claude generates the report, by parsing the `[Q1: ...]` segments of `full_transcript`. Even if Claude scores an answer 0, a non-zero `answer_char_count` confirms the mic was recording and Whisper received real audio.
-
----
-
-## Recent Fixes (post March 5, updated March 8)
-
-- **All-platform Whisper transcription** — Web Speech API removed entirely. All platforms (iOS, Android, desktop) now use `MediaRecorder` to capture one audio clip per question, sent to a new `POST /api/interview/transcribe` backend endpoint (OpenAI Whisper-1). Mic stream acquired once at "Allow Microphone" and reused for the whole interview. No live transcript shown — clean question-only UI. Transcript box removed. Next/Skip/End all async: stop recording → Whisper → store → advance. (`74dbda3`, `bd321ed`, `a4b56c9`)
-- **Double-transcription guard on last question** — when user taps Next on the final question, `nextQuestion()` transcribes and stores before calling `advance()→finish()`. Added guard in `finish()` to skip re-transcription if index already stored. (`a4b56c9`)
-- **Skip/End-early transcript correctness** — skipped questions stored as `[SKIPPED]`; unvisited questions (end early) stored as `(no answer)`. Verified via 5-scenario × 5-run test suite. (`a4b56c9`, `54a32ff`)
-- **Persistent mic stream** — `micStreamRef` keeps the `getUserMedia` stream alive for entire interview; `MediaRecorder` creates a new instance per question without re-requesting permission. (`bd321ed`)
-- **Browser compatibility note on instructions screen** — softened to grey footnote: "Best experienced on Chrome, Edge, or Safari on macOS." (`073974f`)
-
-- **Duplicate transcript entries** — Web Speech API race condition causing duplicate `onresult` events written to transcript. Fixed by deduplicating on result index (`0b717fe`, `d8c2a32`).
-- **Per-question report deduplication** — fixed duplicate entries in evaluation report (`d8c2a32`).
-- **`answer_char_count` in report** — `routers.py` now parses `full_transcript` after Claude generates the report and enriches each `per_question` entry with the character count of the candidate's answer. Lets you verify audio was captured even when score is 0. (`b102453`)
-- **Audio `.mp3` files gitignored** — `interview-module/backend/audio/*.mp3` added to `.gitignore`, files removed from git tracking. (`latest`)
-- **Blank screen after mic grant** — stale `prefetchedAudioRef` reference after question bank refactor. Fixed (`4f64f0e`).
-- **Mock interview delay + pre-fetch audio destroyed on start** — timing bug in mock interview flow; pre-fetched audio was being torn down before playback. Fixed (`8217754`).
-- **Overlapping audio / audio-after-End** — audio kept playing past interview end or overlapped on question advance. Fixed (`42c9f0e`).
-- **UnboundLocalError in `create_screening`** — `job` variable referenced before assignment in error path. Fixed (`7539e77`).
-- **Applications list 500** — `CandidateResponse.email` was `EmailStr`, rejecting test emails like `matt@bat`. Changed to `str` (`f034fd1`).
-- **Publish button / screening config during generation** — Jobs list now shows amber "Generating…" pill; screening config grayed out with `pointer-events-none` while setup in progress (`f034fd1`).
-- **Auto-trigger setup for old jobs** — jobs created before `setup_status` column existed now auto-trigger setup on first load (`05cf0a1`).
-- **Question type badge removed** — cleaned up from interview UI (`cc1af65`).
+- **HEAD:** `59c2dd9` — 12 commits ahead of `origin/main` (not pushed)
+- **Last work:** CC probe E2E test — fixed wrong number input targeting, fixed behavioral_pct ordering
+- **All 4 services running** on standard ports (8000, 8001, 5173, 5174)
+- **Stable rollback point:** `d1c85db` (`test: Test 7 — in_progress re-entry regression + full interview launch`)
 
 ---
 
@@ -246,23 +156,21 @@ interview-module/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py         — FastAPI app entry, mounts all routers
-│   │   ├── routers.py      — All API endpoints (questions, session, evaluate, report, settings, testdata)
-│   │   ├── claude_client.py — All Claude API calls (question gen, evaluation, report)
-│   │   └── database.py     — SQLite setup (sessions, settings tables)
+│   │   ├── routers.py      — All API endpoints
+│   │   ├── claude_client.py — All Claude API calls
+│   │   ├── video_client.py — D-ID / HeyGen video generation
+│   │   └── database.py     — SQLite setup
 │   └── requirements.txt
 └── frontend/
     └── src/pages/
-        ├── Setup.jsx        — Interview setup form (resume, JD, config, test data)
-        ├── Interview.jsx    — Main interview UI (voice input, timer, question flow)
+        ├── Setup.jsx        — Interview setup form
+        ├── Interview.jsx    — Main interview UI (voice, code, draw tabs; CC probes; video mode)
         ├── Report.jsx       — Post-interview report display
-        ├── Settings.jsx     — Evaluation prompt editor
-        └── ThankYou.jsx     — Shown after interview completes (new, unstaged)
+        ├── Settings.jsx     — Evaluation prompt editor + video provider selector
+        └── ThankYou.jsx     — Shown after interview completes
+
+tests/
+├── test_e2e_interview_flow.py   — Full interview flow E2E (7 tests)
+├── test_core_competency.py      — CC probe E2E (20 checks, browser-driven)
+└── recordings/                  — WebM recordings from --record runs
 ```
-
----
-
-## Next Task to Build
-
-**Task 7: Natural Conversation — small talk intro + transition phrases between questions**
-
-See Task 7 section below for implementation plan.
