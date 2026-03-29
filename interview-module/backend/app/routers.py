@@ -596,6 +596,7 @@ def get_session(session_id: str):
         "verify_coding_ability": bool(row["verify_coding_ability"]) if "verify_coding_ability" in row.keys() else False,
         "video_interview_enabled": bool(row["video_interview_enabled"]) if "video_interview_enabled" in row.keys() else False,
         "draw_answers": json.loads(row["draw_answers"]) if "draw_answers" in row.keys() and row["draw_answers"] else None,
+        "proctoring_data": json.loads(row["proctoring_data"]) if "proctoring_data" in row.keys() and row["proctoring_data"] else None,
     }
 
 
@@ -625,6 +626,7 @@ class CompleteRequest(BaseModel):
     questions: Optional[list] = None
     code_answers: Optional[dict] = None  # {questionIndex: codeString}
     draw_answers: Optional[list] = None  # [base64PngString | null, ...]
+    proctoring_data: Optional[dict] = None  # {events: [...], snapshots: [...], identity_photo: str|null}
 
 @session_router.post("/session/{session_id}/complete")
 def complete_session(session_id: str, req: CompleteRequest = CompleteRequest()):
@@ -638,10 +640,12 @@ def complete_session(session_id: str, req: CompleteRequest = CompleteRequest()):
     evaluation_prompt = settings_row["value"] if settings_row else ""
     code_answers = req.code_answers or {}
     draw_answers = req.draw_answers or []
+    proctoring_data = req.proctoring_data or {}
     report = ai.generate_report_from_transcript(
         row["job_description"], row["resume_text"], questions, full_transcript, evaluation_prompt,
         code_answers=code_answers,
         draw_answers=draw_answers,
+        proctoring_data=proctoring_data,
     )
 
     # Enrich per_question with answer_char_count extracted from full_transcript.
@@ -671,8 +675,10 @@ def complete_session(session_id: str, req: CompleteRequest = CompleteRequest()):
             pq["draw_submission"] = draw_answers[draw_idx]
 
     conn.execute(
-        "UPDATE sessions SET status='completed', report=?, draw_answers=?, completed_at=? WHERE id=?",
-        (json.dumps(report), json.dumps(draw_answers) if draw_answers else None, datetime.utcnow().isoformat(), session_id)
+        "UPDATE sessions SET status='completed', report=?, draw_answers=?, proctoring_data=?, completed_at=? WHERE id=?",
+        (json.dumps(report), json.dumps(draw_answers) if draw_answers else None,
+         json.dumps(proctoring_data) if proctoring_data else None,
+         datetime.utcnow().isoformat(), session_id)
     )
     conn.commit()
     conn.close()

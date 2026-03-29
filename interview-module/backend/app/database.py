@@ -91,6 +91,9 @@ def init_db():
     _add_column_if_missing(conn, "questions", "is_core_competency", "INTEGER DEFAULT 0")
     _add_column_if_missing(conn, "questions", "probe_questions", "TEXT DEFAULT NULL")
 
+    # Proctoring data — events + snapshots captured during interview
+    _add_column_if_missing(conn, "sessions", "proctoring_data", "TEXT DEFAULT NULL")
+
     # Job setup state — tracks background question/audio generation per job
     conn.execute("""
         CREATE TABLE IF NOT EXISTS job_setup (

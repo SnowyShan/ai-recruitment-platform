@@ -26,12 +26,17 @@ export default function Report() {
   const [expanded, setExpanded] = useState({})
   const [loading, setLoading] = useState(true)
 
+  const [proctoringData, setProctoringData] = useState(null)
+
   useEffect(() => {
     const load = async () => {
       try {
         const { data } = await axios.get(`${API}/api/interview/session/${sessionId}`)
-        if (data.report) { setReport(data.report); setLoading(false) }
-        else {
+        if (data.report) {
+          setReport(data.report)
+          setProctoringData(data.proctoring_data || null)
+          setLoading(false)
+        } else {
           const { data: r } = await axios.post(`${API}/api/interview/session/${sessionId}/complete`)
           setReport(r); setLoading(false)
         }
@@ -125,6 +130,92 @@ export default function Report() {
           <h3 className="text-sm font-semibold text-slate-700 mb-1">Hiring Recommendation</h3>
           <p className="text-slate-600 text-sm">{report.hiring_recommendation}</p>
         </div>
+
+        {/* Proctoring summary */}
+        {(report.proctoring_summary || proctoringData) && (() => {
+          const ps = report.proctoring_summary || {}
+          const risk = ps.risk_level || 'low'
+          const riskColor = risk === 'high' ? 'text-red-600 bg-red-50 border-red-200'
+            : risk === 'medium' ? 'text-amber-600 bg-amber-50 border-amber-200'
+            : 'text-emerald-600 bg-emerald-50 border-emerald-200'
+          const riskLabel = risk === 'high' ? '⚠ High Risk' : risk === 'medium' ? '⚡ Medium Risk' : '✓ Low Risk'
+          const events = proctoringData?.events || []
+          const snapshots = proctoringData?.snapshots || []
+          const identityPhoto = proctoringData?.identity_photo || null
+
+          return (
+            <div className="card p-5 border border-slate-200">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-slate-700">Proctoring Report</h3>
+                <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${riskColor}`}>{riskLabel}</span>
+              </div>
+
+              {ps.notes && <p className="text-slate-600 text-sm mb-3">{ps.notes}</p>}
+
+              {ps.flags?.length > 0 && (
+                <ul className="mb-3 space-y-1">
+                  {ps.flags.map((f, i) => (
+                    <li key={i} className="text-xs text-slate-600 flex gap-1.5">
+                      <span className="text-amber-500">⚑</span>{f}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* Event timeline */}
+              {events.length > 0 && (
+                <details className="mb-3">
+                  <summary className="text-xs font-semibold text-slate-500 cursor-pointer hover:text-slate-700">
+                    Event log ({events.length} events)
+                  </summary>
+                  <div className="mt-2 max-h-40 overflow-y-auto space-y-0.5">
+                    {events.map((e, i) => (
+                      <div key={i} className="text-xs text-slate-500 font-mono">
+                        <span className="text-slate-400">[{e.ts_label}]</span>{' '}
+                        <span className={
+                          e.type === 'multiple_faces' || e.type === 'tab_hidden' ? 'text-amber-600 font-semibold' :
+                          e.type === 'face_absent' ? 'text-red-500 font-semibold' : ''
+                        }>{e.type}</span>
+                        {e.detail ? ` — ${e.detail}` : ''}
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+
+              {/* Snapshots grid */}
+              {snapshots.length > 0 && (
+                <details className="mb-3">
+                  <summary className="text-xs font-semibold text-slate-500 cursor-pointer hover:text-slate-700">
+                    Snapshots ({snapshots.length})
+                  </summary>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {snapshots.map((s, i) => (
+                      <img key={i} src={s} alt={`snapshot ${i+1}`}
+                        className="w-24 h-18 object-cover rounded-lg border border-slate-200"
+                        style={{ height: 72 }}
+                      />
+                    ))}
+                  </div>
+                </details>
+              )}
+
+              {/* Identity photo */}
+              {identityPhoto && (
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 mb-1">Identity Photo</p>
+                  <img src={identityPhoto} alt="Identity"
+                    className="w-32 h-24 object-cover rounded-lg border border-slate-200"
+                  />
+                </div>
+              )}
+
+              {events.length === 0 && !identityPhoto && (
+                <p className="text-xs text-slate-400">No proctoring events recorded.</p>
+              )}
+            </div>
+          )
+        })()}
 
         {/* Per-question breakdown */}
         <div>

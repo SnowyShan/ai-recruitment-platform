@@ -263,7 +263,7 @@ def _mock_report() -> dict:
     return {"overall_score": 72, "pass": True, "summary": "Mock report — add API key for real analysis.", "strengths": ["Communicates clearly"], "weaknesses": ["Needs more depth"], "hiring_recommendation": "Consider for next round.", "per_question": []}
 
 
-def generate_report_from_transcript(job_description: str, resume_text: str, questions: list, full_transcript: str, evaluation_prompt: str = "", code_answers: dict = None, draw_answers: list = None) -> dict:
+def generate_report_from_transcript(job_description: str, resume_text: str, questions: list, full_transcript: str, evaluation_prompt: str = "", code_answers: dict = None, draw_answers: list = None, proctoring_data: dict = None) -> dict:
     client = _client()
     if not client:
         return _mock_report()
@@ -317,6 +317,16 @@ For questions with submitted drawings:
 - Evaluate whether the drawing demonstrates understanding of the question and clear visual communication.
 - Include a "draw_analysis" field in the per_question entry with your analysis of the submitted drawing."""
 
+    # Build proctoring summary for the prompt
+    proctoring_section = ""
+    if proctoring_data and proctoring_data.get("events"):
+        events = proctoring_data["events"]
+        event_lines = "\n".join(
+            f"  [{e.get('ts_label','?')}] {e.get('type','?')}: {e.get('detail','')}"
+            for e in events
+        )
+        proctoring_section = f"\n\nProctoring Events (for context — do NOT penalise unless egregious):\n{event_lines}"
+
     prompt_text = f"""You are a senior technical interviewer writing a hiring evaluation report.
 
 Job Description:
@@ -329,7 +339,7 @@ Interview Questions:
 {questions_list}
 
 Full Interview Transcript (questions marked with [Q1:], [Q2:] etc, [SKIPPED] means candidate skipped):
-{full_transcript}{code_section}{draw_section}
+{full_transcript}{code_section}{draw_section}{proctoring_section}
 
 Evaluation guidelines:
 {guidelines}{code_eval_guidelines}{draw_eval_guidelines}{core_competency_guidelines}
@@ -342,6 +352,11 @@ Return ONLY valid JSON in this exact format:
   "strengths": ["...", "..."],
   "weaknesses": ["...", "..."],
   "hiring_recommendation": "...",
+  "proctoring_summary": {{
+    "risk_level": "low" | "medium" | "high",
+    "flags": ["...", "..."],
+    "notes": "..."
+  }},
   "per_question": [
     {{
       "question": "...",
@@ -354,7 +369,8 @@ Return ONLY valid JSON in this exact format:
     }}
   ]
 }}
-Note: "code_analysis" should only be present for questions that have a non-empty code submission. "draw_analysis" should only be present for questions that have a drawing submission. Omit both for other questions."""
+Note: "code_analysis" should only be present for questions that have a non-empty code submission. "draw_analysis" should only be present for questions that have a drawing submission. Omit both for other questions.
+For "proctoring_summary": if no proctoring events were logged, set risk_level to "low", flags to [], notes to "No issues detected." Base risk_level on frequency/severity of tab switches, face absences, and multiple-face events."""
 
     # Build multimodal content blocks when drawings are present
     if non_empty_draws:
