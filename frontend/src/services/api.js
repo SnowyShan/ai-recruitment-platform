@@ -98,6 +98,7 @@ export const applicationsAPI = {
 
 // Screenings API
 export const screeningsAPI = {
+  getByJob: () => api.get('/api/screenings/by-job'),
   getAll: (params) => api.get('/api/screenings', { params }),
   getById: (id) => api.get(`/api/screenings/${id}`),
   create: (data) => api.post('/api/screenings', data),

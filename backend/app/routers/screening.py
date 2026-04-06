@@ -268,17 +268,75 @@ async def start_from_token(token: str, db: Session = Depends(get_db)):
 async def get_screenings(
     status: Optional[str] = None,
     application_id: Optional[int] = None,
+    job_id: Optional[int] = None,
     skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(100, ge=1, le=500),
     current_user: models.User = Depends(auth.get_current_user),
     db: Session = Depends(get_db)
 ):
-    query = db.query(models.Screening)
+    query = db.query(models.Screening).options(
+        joinedload(models.Screening.application).joinedload(models.Application.candidate),
+        joinedload(models.Screening.application).joinedload(models.Application.job),
+    )
     if status:
         query = query.filter(models.Screening.status == status)
     if application_id:
         query = query.filter(models.Screening.application_id == application_id)
+    if job_id:
+        query = query.join(models.Application).filter(models.Application.job_id == job_id)
     return query.order_by(models.Screening.scheduled_at.desc()).offset(skip).limit(limit).all()
+
+
+@router.get("/by-job")
+async def get_screenings_by_job(
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Return all jobs that have at least one screening, with full candidate details."""
+    screenings = db.query(models.Screening).options(
+        joinedload(models.Screening.application).joinedload(models.Application.candidate),
+        joinedload(models.Screening.application).joinedload(models.Application.job),
+    ).order_by(models.Screening.scheduled_at.desc()).all()
+
+    jobs_map: dict = {}
+    for s in screenings:
+        app = s.application
+        if not app or not app.job:
+            continue
+        job = app.job
+        jid = job.id
+        if jid not in jobs_map:
+            jobs_map[jid] = {
+                "job_id": jid,
+                "job_title": job.title,
+                "job_department": job.department,
+                "job_location": job.location,
+                "job_status": job.status,
+                "screenings": [],
+            }
+        jobs_map[jid]["screenings"].append({
+            "id": s.id,
+            "application_id": s.application_id,
+            "status": s.status,
+            "overall_score": s.overall_score,
+            "technical_score": s.technical_score,
+            "recommendation": s.recommendation,
+            "scheduled_at": s.scheduled_at.isoformat() if s.scheduled_at else None,
+            "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+            "invite_used": s.invite_used,
+            "invite_token": s.invite_token,
+            "interview_session_id": s.interview_session_id,
+            "ai_evaluation": s.ai_evaluation,
+            "candidate": {
+                "id": app.candidate.id,
+                "full_name": app.candidate.full_name,
+                "email": app.candidate.email,
+            } if app.candidate else None,
+        })
+
+    result = list(jobs_map.values())
+    result.sort(key=lambda j: j["screenings"][0]["scheduled_at"] or "", reverse=True)
+    return result
 
 
 @router.get("/stats")
