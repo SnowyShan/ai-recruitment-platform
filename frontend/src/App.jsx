@@ -13,7 +13,6 @@ import BrowseJobs from './pages/BrowseJobs';
 import ApplyJob from './pages/ApplyJob';
 import CandidateStatus from './pages/CandidateStatus';
 import JobDetail from './pages/JobDetail';
-import Settings from './pages/Settings';
 
 function App() {
   return (
@@ -38,7 +37,6 @@ function App() {
             <Route path="/candidates" element={<Candidates />} />
             <Route path="/applications" element={<Applications />} />
             <Route path="/screenings" element={<Screenings />} />
-            <Route path="/settings" element={<Settings />} />
             <Route path="/help" element={<Help />} />
           </Route>
           

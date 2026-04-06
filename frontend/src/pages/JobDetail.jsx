@@ -742,6 +742,8 @@ export default function JobDetail() {
       difficulty: job.interview_difficulty ?? 3,
       seniority: job.interview_seniority ?? 'mid',
       behavioral_pct: job.interview_behavioral_pct ?? 20,
+      auto_invite_screening: job.auto_invite_screening ?? false,
+      auto_invite_threshold: job.auto_invite_threshold ?? 75,
     });
   }
 
@@ -791,6 +793,8 @@ Experience: 5 years of relevant industry experience.`;
         interview_difficulty: screeningConfig.difficulty,
         interview_seniority: screeningConfig.seniority,
         interview_behavioral_pct: screeningConfig.behavioral_pct,
+        auto_invite_screening: screeningConfig.auto_invite_screening,
+        auto_invite_threshold: screeningConfig.auto_invite_threshold,
       });
       setConfigSaved(true);
       setTimeout(() => setConfigSaved(false), 2000);
@@ -1028,6 +1032,45 @@ Experience: 5 years of relevant industry experience.`;
                   >{l}</button>
                 ))}
               </div>
+            </div>
+
+            {/* Screening Automation Toggle */}
+            <div className="sm:col-span-2 pt-4 border-t border-slate-100 flex flex-col gap-4">
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={screeningConfig.auto_invite_screening}
+                  onClick={() => setScreeningConfig(c => ({ ...c, auto_invite_screening: !c.auto_invite_screening }))}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    screeningConfig.auto_invite_screening ? 'bg-indigo-600' : 'bg-slate-300'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      screeningConfig.auto_invite_screening ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium text-slate-700">Auto-invite to screening</span>
+                  <span className="text-xs text-slate-400">Automatically send invites to public applicants meeting the threshold</span>
+                </div>
+              </label>
+
+              {screeningConfig.auto_invite_screening && (
+                <div className="pl-14">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Minimum resume match score (%)
+                  </label>
+                  <input
+                    type="number" min={1} max={100}
+                    value={screeningConfig.auto_invite_threshold}
+                    onChange={e => setScreeningConfig(c => ({ ...c, auto_invite_threshold: parseInt(e.target.value) || 75 }))}
+                    className="w-28 px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  />
+                </div>
+              )}
             </div>
 
             {/* Save + Mock Interview buttons */}

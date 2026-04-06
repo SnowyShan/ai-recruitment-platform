@@ -27,8 +27,8 @@ const Layout = () => {
             </button>
 
             {/* Search — hidden on small screens */}
-            <div className="flex-1 max-w-xl hidden sm:block">
-              <div className="relative">
+            <div className="flex-1 hidden sm:block">
+              <div className="relative h-full">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   type="text"

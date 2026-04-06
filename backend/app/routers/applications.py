@@ -9,7 +9,7 @@ import json
 router = APIRouter(prefix="/api/applications", tags=["Applications"])
 
 
-@router.post("/", response_model=schemas.ApplicationResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=schemas.ApplicationResponse, status_code=status.HTTP_201_CREATED)
 async def create_application(
     application_data: schemas.ApplicationCreate,
     current_user: models.User = Depends(auth.get_current_user),
@@ -85,7 +85,7 @@ async def create_application(
     return new_application
 
 
-@router.get("/", response_model=List[schemas.ApplicationResponse])
+@router.get("", response_model=List[schemas.ApplicationResponse])
 async def get_applications(
     job_id: Optional[int] = None,
     status: Optional[str] = None,

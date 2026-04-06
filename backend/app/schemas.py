@@ -99,6 +99,8 @@ class JobBase(BaseModel):
 class JobCreate(JobBase):
     interview_behavioral_pct: Optional[int] = 20
     selected_question_ids: Optional[list] = []  # pre-selected from question bank
+    auto_invite_screening: Optional[bool] = False
+    auto_invite_threshold: Optional[int] = 75
 
 
 class JobUpdate(BaseModel):
@@ -122,6 +124,8 @@ class JobUpdate(BaseModel):
     interview_seniority: Optional[str] = None
     interview_behavioral_pct: Optional[int] = None
     selected_question_ids: Optional[list] = None  # passed when triggering re-setup
+    auto_invite_screening: Optional[bool] = None
+    auto_invite_threshold: Optional[int] = None
 
 
 class JobResponse(JobBase):
@@ -138,6 +142,8 @@ class JobResponse(JobBase):
     interview_behavioral_pct: Optional[int] = 20
     domain: Optional[str] = None
     setup_status: Optional[str] = None
+    auto_invite_screening: Optional[bool] = False
+    auto_invite_threshold: Optional[int] = 75
 
     class Config:
         from_attributes = True

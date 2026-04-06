@@ -179,9 +179,9 @@ const Dashboard = () => {
       </div>
 
       {/* Main Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 gap-6">
         {/* Pipeline Overview */}
-        <div className="lg:col-span-2 card">
+        <div className="card">
           <div className="card-header flex items-center justify-between">
             <h2 className="text-lg font-semibold text-slate-900">Hiring Pipeline</h2>
             <Link to="/applications" className="text-sm text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1">
@@ -214,57 +214,6 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Quick Actions */}
-        <div className="card">
-          <div className="card-header">
-            <h2 className="text-lg font-semibold text-slate-900">Quick Actions</h2>
-          </div>
-          <div className="card-body space-y-3">
-            <Link to="/jobs/new" className="flex items-center gap-4 p-4 rounded-xl bg-gradient-to-r from-primary-500 to-primary-600 text-white hover:from-primary-600 hover:to-primary-700 transition-all group">
-              <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
-                <Briefcase className="w-5 h-5" />
-              </div>
-              <div className="flex-1">
-                <div className="font-medium">Post New Job</div>
-                <div className="text-sm text-white/70">Create a new job posting</div>
-              </div>
-              <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-            </Link>
-
-            <Link to="/candidates" className="flex items-center gap-4 p-4 rounded-xl bg-slate-50 hover:bg-slate-100 transition-all group">
-              <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
-                <Users className="w-5 h-5 text-emerald-600" />
-              </div>
-              <div className="flex-1">
-                <div className="font-medium text-slate-900">Add Candidate</div>
-                <div className="text-sm text-slate-500">Import or add manually</div>
-              </div>
-              <ArrowRight className="w-5 h-5 text-slate-400 group-hover:translate-x-1 transition-transform" />
-            </Link>
-
-            <Link to="/screenings" className="flex items-center gap-4 p-4 rounded-xl bg-slate-50 hover:bg-slate-100 transition-all group">
-              <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                <Sparkles className="w-5 h-5 text-purple-600" />
-              </div>
-              <div className="flex-1">
-                <div className="font-medium text-slate-900">AI Screening</div>
-                <div className="text-sm text-slate-500">Start automated interviews</div>
-              </div>
-              <ArrowRight className="w-5 h-5 text-slate-400 group-hover:translate-x-1 transition-transform" />
-            </Link>
-
-            <Link to="/applications" className="flex items-center gap-4 p-4 rounded-xl bg-slate-50 hover:bg-slate-100 transition-all group">
-              <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
-                <FileText className="w-5 h-5 text-amber-600" />
-              </div>
-              <div className="flex-1">
-                <div className="font-medium text-slate-900">Review Applications</div>
-                <div className="text-sm text-slate-500">{stats?.pending_applications || 0} pending</div>
-              </div>
-              <ArrowRight className="w-5 h-5 text-slate-400 group-hover:translate-x-1 transition-transform" />
-            </Link>
-          </div>
-        </div>
       </div>
 
       {/* Recent Applications & Top Jobs */}

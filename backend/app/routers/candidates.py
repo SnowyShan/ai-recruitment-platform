@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/candidates", tags=["Candidates"])
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./uploads")
 
 
-@router.post("/", response_model=schemas.CandidateResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=schemas.CandidateResponse, status_code=status.HTTP_201_CREATED)
 async def create_candidate(
     candidate_data: schemas.CandidateCreate,
     current_user: models.User = Depends(auth.get_current_user),
@@ -43,7 +43,7 @@ async def create_candidate(
     return new_candidate
 
 
-@router.get("/", response_model=List[schemas.CandidateResponse])
+@router.get("", response_model=List[schemas.CandidateResponse])
 async def get_candidates(
     search: Optional[str] = None,
     skills: Optional[str] = None,

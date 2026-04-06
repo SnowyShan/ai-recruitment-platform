@@ -195,12 +195,10 @@ async def public_apply(
 
     # ── Auto-invite to screening if enabled and score meets threshold ─────
     if application.match_score is not None:
-        auto_enabled_row = db.query(models.Setting).filter(models.Setting.key == "auto_invite_screening").first()
-        auto_enabled = auto_enabled_row and auto_enabled_row.value == "true"
-
+        auto_enabled = application.job.auto_invite_screening if application.job else False
+        
         if auto_enabled:
-            threshold_row = db.query(models.Setting).filter(models.Setting.key == "auto_invite_threshold").first()
-            threshold = int(threshold_row.value) if threshold_row else 75
+            threshold = application.job.auto_invite_threshold if application.job else 75
 
             if application.match_score >= threshold:
                 # Guard against duplicate screening

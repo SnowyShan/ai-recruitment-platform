@@ -82,6 +82,8 @@ class Job(Base):
     interview_difficulty      = Column(Integer, default=3)
     interview_seniority       = Column(String(20), default="mid")
     interview_behavioral_pct  = Column(Integer, default=20)   # % of questions that are behavioral
+    auto_invite_screening     = Column(Boolean, default=False)
+    auto_invite_threshold     = Column(Integer, default=75)
 
     # Question-bank setup state (managed by interview module background tasks)
     domain        = Column(String(50), nullable=True)   # inferred from job title

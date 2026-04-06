@@ -71,7 +71,7 @@ def log_activity(db, user_id, action, entity_type=None, entity_id=None, details=
 
 # ── create / invite ───────────────────────────────────────────────────────────
 
-@router.post("/", response_model=schemas.ScreeningResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=schemas.ScreeningResponse, status_code=status.HTTP_201_CREATED)
 async def create_screening(
     screening_data: schemas.ScreeningCreate,
     current_user: models.User = Depends(auth.get_current_user),
@@ -264,7 +264,7 @@ async def start_from_token(token: str, db: Session = Depends(get_db)):
 
 # ── standard CRUD ─────────────────────────────────────────────────────────────
 
-@router.get("/", response_model=List[schemas.ScreeningResponse])
+@router.get("", response_model=List[schemas.ScreeningResponse])
 async def get_screenings(
     status: Optional[str] = None,
     application_id: Optional[int] = None,
