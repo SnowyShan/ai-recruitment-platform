@@ -433,7 +433,7 @@ def _make_resume_pdf() -> bytes:
     ]
     for line in lines:
         pdf.cell(0, 6, line, ln=True)
-    return bytes(pdf.output())
+    return pdf.output().encode('latin-1')
 
 
 def test_candidate_application_flow(job_id: int, recruiter_token: str,
@@ -709,7 +709,7 @@ def test_interview_launch(job_id: int, recruiter_token: str):
     r = requests.post(
         f"{TB_API}/api/public/apply",
         data={"job_id": job_id, "full_name": f"T7 Candidate {_RUN_ID[:6]}",
-              "email": candidate_email},
+              "email": candidate_email, "captcha_token": "test-token-bypass"},
         files={"resume": ("resume.pdf", resume_pdf, "application/pdf")},
     )
     if r.status_code != 201:

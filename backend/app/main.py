@@ -80,6 +80,10 @@ async def rate_limit_middleware(request: Request, call_next):
     if request.url.path in excluded_paths:
         return await call_next(request)
 
+    # Skip rate limiting in DEBUG mode (tests)
+    if os.getenv("DEBUG", "").lower() in ("true", "1", "yes"):
+        return await call_next(request)
+
     client_id = get_remote_address(request)
     if not rate_limiter.is_allowed(client_id):
         from fastapi.responses import JSONResponse

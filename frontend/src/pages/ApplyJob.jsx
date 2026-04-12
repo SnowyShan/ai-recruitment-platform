@@ -4,6 +4,7 @@ import { publicAPI } from '../services/api';
 import { MapPin, Briefcase, DollarSign, Sparkles, CheckCircle, ArrowLeft, Upload } from 'lucide-react';
 
 const HCAPTCHA_SITE_KEY = import.meta.env.VITE_HCAPTCHA_SITE_KEY || '10000000-ffff-ffff-ffff-000000000001';
+const BYPASS_CAPTCHA = import.meta.env.VITE_BYPASS_CAPTCHA === 'true';
 
 const formatSalary = (min, max) => {
   if (!min && !max) return null;
@@ -90,7 +91,7 @@ const ApplyJob = () => {
     setSubmitting(true);
     setError('');
     try {
-      if (!captchaToken && captchaLoaded) {
+      if (!BYPASS_CAPTCHA && !captchaToken && captchaLoaded) {
         setError('Please complete the CAPTCHA verification.');
         setSubmitting(false);
         return;
@@ -306,7 +307,7 @@ const ApplyJob = () => {
               </label>
             </div>
 
-            {captchaLoaded && (
+            {captchaLoaded && !BYPASS_CAPTCHA && (
               <div className="flex justify-center">
                 <div id="hcaptcha-container" />
               </div>

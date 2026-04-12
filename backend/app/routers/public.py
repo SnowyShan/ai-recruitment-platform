@@ -23,9 +23,13 @@ import json, uuid, os, httpx
 HCAPTCHA_SECRET_KEY = os.getenv(
     "HCAPTCHA_SECRET_KEY", "0x0000000000000000000000000000000000000000"
 )
+BYPASS_CAPTCHA = os.getenv("BYPASS_CAPTCHA", "").lower() in ("true", "1", "yes")
 
 
 async def verify_hcaptcha(token: str, remoteip: str = None) -> bool:
+    if BYPASS_CAPTCHA:
+        return True
+
     if not token:
         return False
 
