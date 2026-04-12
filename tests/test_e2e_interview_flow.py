@@ -359,7 +359,7 @@ def run_test(record: bool = False):
     resp = requests.post(
         f"{INTERVIEW_API}/api/interview/session/{session_id}/complete",
         json={"full_transcript": full_transcript, "questions": questions},
-        timeout=120,
+        timeout=300,
     )
     resp.raise_for_status()
     print("  Submitted ✅")

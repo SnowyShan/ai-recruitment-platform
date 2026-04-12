@@ -640,7 +640,7 @@ For "proctoring_summary": if no proctoring events were logged, set risk_level to
             model="claude-sonnet-4-5-20250929",
             max_tokens=3000,
             messages=[{"role": "user", "content": message_content}],
-            timeout=30.0,
+            timeout=120.0,
         )
 
     resp = _call_api()
