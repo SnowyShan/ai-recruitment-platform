@@ -1,6 +1,5 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import os
 from dotenv import load_dotenv
@@ -17,12 +16,17 @@ from .routers import (
     public_router,
     settings_router,
 )
+from .routers.rate_limit import RateLimiter, get_remote_address
 
 load_dotenv()
+
+rate_limiter = RateLimiter(requests=20, period=60.0)
+
 
 # Create database tables on startup
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+
     # Create tables (new tables only — does not alter existing ones)
     Base.metadata.create_all(bind=engine)
     run_migrations(engine)
@@ -33,14 +37,19 @@ async def lifespan(app: FastAPI):
         if "screenings" in insp.get_table_names():
             cols = [c["name"] for c in insp.get_columns("screenings")]
             if "source" not in cols:
-                conn.execute(text("ALTER TABLE screenings ADD COLUMN source VARCHAR(20) DEFAULT 'manual'"))
+                conn.execute(
+                    text(
+                        "ALTER TABLE screenings ADD COLUMN source VARCHAR(20) DEFAULT 'manual'"
+                    )
+                )
 
     # Create uploads directory
     upload_dir = os.getenv("UPLOAD_DIR", "./uploads")
     os.makedirs(upload_dir, exist_ok=True)
-    
+
     yield
     # Cleanup if needed
+
 
 app = FastAPI(
     title="TalentBridge AI",
@@ -51,7 +60,9 @@ app = FastAPI(
 )
 
 # CORS Configuration
-cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173")
+cors_origins = os.getenv(
+    "CORS_ORIGINS", "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
+)
 origins = [origin.strip() for origin in cors_origins.split(",")]
 
 app.add_middleware(
@@ -61,6 +72,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    excluded_paths = ["/health", "/docs", "/openapi.json", "/redoc"]
+    if request.url.path in excluded_paths:
+        return await call_next(request)
+
+    client_id = get_remote_address(request)
+    if not rate_limiter.is_allowed(client_id):
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limit exceeded: 20 requests per minute"},
+        )
+    return await call_next(request)
+
 
 # Include routers
 app.include_router(auth_router)
@@ -82,7 +111,7 @@ async def root():
         "description": "AI-Powered Recruitment Platform",
         "status": "running",
         "docs": "/docs",
-        "redoc": "/redoc"
+        "redoc": "/redoc",
     }
 
 
@@ -104,6 +133,6 @@ async def api_info():
             "applications": "/api/applications",
             "screenings": "/api/screenings",
             "dashboard": "/api/dashboard",
-            "settings": "/api/settings"
-        }
+            "settings": "/api/settings",
+        },
     }

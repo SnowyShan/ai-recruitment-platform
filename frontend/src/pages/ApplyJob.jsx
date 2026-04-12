@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { publicAPI } from '../services/api';
 import { MapPin, Briefcase, DollarSign, Sparkles, CheckCircle, ArrowLeft, Upload } from 'lucide-react';
+
+const HCAPTCHA_SITE_KEY = import.meta.env.VITE_HCAPTCHA_SITE_KEY || '10000000-ffff-ffff-ffff-000000000001';
 
 const formatSalary = (min, max) => {
   if (!min && !max) return null;
@@ -19,12 +21,46 @@ const ApplyJob = () => {
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState('');
   const [resumeFile, setResumeFile] = useState(null);
+  const [captchaToken, setCaptchaToken] = useState(null);
+  const [captchaLoaded, setCaptchaLoaded] = useState(false);
+  const captchaRef = useRef(null);
   const [form, setForm] = useState({
     full_name: '',
     email: '',
     phone: '',
     cover_letter: '',
   });
+
+  useEffect(() => {
+    const loadHCaptcha = () => {
+      if (window.hcaptcha) {
+        setCaptchaLoaded(true);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://js.hcaptcha.com/1/api.js?render=explicit';
+      script.async = true;
+      script.defer = true;
+      script.onload = () => setCaptchaLoaded(true);
+      document.head.appendChild(script);
+    };
+    loadHCaptcha();
+  }, []);
+
+  useEffect(() => {
+    if (!captchaLoaded || !window.hcaptcha) return;
+
+    window.hcaptcha.render('hcaptcha-container', {
+      sitekey: HCAPTCHA_SITE_KEY,
+      callback: handleCaptchaVerify,
+      'expired-callback': handleCaptchaExpire,
+      'error-callback': () => {
+        setCaptchaToken(null);
+      },
+      theme: 'light',
+      size: 'normal',
+    });
+  }, [captchaLoaded]);
 
   useEffect(() => {
     const fetchJob = async () => {
@@ -54,6 +90,12 @@ const ApplyJob = () => {
     setSubmitting(true);
     setError('');
     try {
+      if (!captchaToken && captchaLoaded) {
+        setError('Please complete the CAPTCHA verification.');
+        setSubmitting(false);
+        return;
+      }
+
       const formData = new FormData();
       formData.append('job_id', id);
       formData.append('full_name', form.full_name);
@@ -61,14 +103,27 @@ const ApplyJob = () => {
       if (form.phone) formData.append('phone', form.phone);
       if (form.cover_letter) formData.append('cover_letter', form.cover_letter);
       if (resumeFile) formData.append('resume', resumeFile);
+      if (captchaToken) formData.append('captcha_token', captchaToken);
 
       await publicAPI.apply(formData);
       setSubmitted(true);
     } catch (err) {
       setError(err.response?.data?.detail ?? 'Something went wrong. Please try again.');
+      if (captchaRef.current) {
+        captchaRef.current.reset();
+      }
+      setCaptchaToken(null);
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleCaptchaVerify = (token) => {
+    setCaptchaToken(token);
+  };
+
+  const handleCaptchaExpire = () => {
+    setCaptchaToken(null);
   };
 
   if (loading) {
@@ -250,6 +305,12 @@ const ApplyJob = () => {
                 />
               </label>
             </div>
+
+            {captchaLoaded && (
+              <div className="flex justify-center">
+                <div id="hcaptcha-container" />
+              </div>
+            )}
 
             <button
               type="submit"

@@ -1,25 +1,89 @@
 from typing import Optional
 import os, json, math
 from dotenv import load_dotenv
+
 load_dotenv()
+
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
+
+MAX_TEXT_LENGTH = 10000
+
+
+def truncate_text(text: str, max_length: int = MAX_TEXT_LENGTH) -> str:
+    """Truncate text to maximum length with ellipsis if needed."""
+    if not text:
+        return text
+    if len(text) > max_length:
+        return text[:max_length] + "..."
+    return text
+
+
+def _claude_retry():
+    return retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((Exception,)),
+        reraise=True,
+    )
+
 
 # ── Domain inference ──────────────────────────────────────────────────────────
 
 _DOMAIN_KEYWORDS = {
-    'ios':       ['ios', 'swift', 'objective-c', 'xcode', 'uikit', 'swiftui', 'apple'],
-    'android':   ['android', 'kotlin', 'java mobile'],
-    'backend':   ['backend', 'back-end', 'python', 'django', 'fastapi', 'node.js', 'golang',
-                  'go developer', 'rust', 'api developer', 'server-side'],
-    'frontend':  ['frontend', 'front-end', 'react', 'vue', 'angular', 'javascript developer',
-                  'typescript developer', 'ui engineer'],
-    'fullstack': ['full stack', 'fullstack', 'full-stack'],
-    'data':      ['data scientist', 'machine learning', 'ml engineer', 'ai engineer',
-                  'data engineer', 'analytics engineer'],
-    'devops':    ['devops', 'site reliability', 'sre ', 'kubernetes', 'docker', 'aws engineer',
-                  'cloud engineer', 'platform engineer', 'infrastructure'],
-    'mobile':    ['mobile developer', 'react native', 'flutter', 'mobile engineer'],
-    'security':  ['security engineer', 'cybersecurity', 'appsec', 'infosec'],
+    "ios": ["ios", "swift", "objective-c", "xcode", "uikit", "swiftui", "apple"],
+    "android": ["android", "kotlin", "java mobile"],
+    "backend": [
+        "backend",
+        "back-end",
+        "python",
+        "django",
+        "fastapi",
+        "node.js",
+        "golang",
+        "go developer",
+        "rust",
+        "api developer",
+        "server-side",
+    ],
+    "frontend": [
+        "frontend",
+        "front-end",
+        "react",
+        "vue",
+        "angular",
+        "javascript developer",
+        "typescript developer",
+        "ui engineer",
+    ],
+    "fullstack": ["full stack", "fullstack", "full-stack"],
+    "data": [
+        "data scientist",
+        "machine learning",
+        "ml engineer",
+        "ai engineer",
+        "data engineer",
+        "analytics engineer",
+    ],
+    "devops": [
+        "devops",
+        "site reliability",
+        "sre ",
+        "kubernetes",
+        "docker",
+        "aws engineer",
+        "cloud engineer",
+        "platform engineer",
+        "infrastructure",
+    ],
+    "mobile": ["mobile developer", "react native", "flutter", "mobile engineer"],
+    "security": ["security engineer", "cybersecurity", "appsec", "infosec"],
 }
+
 
 def infer_domain(job_title: str) -> str:
     """Infer technical domain from a job title string."""
@@ -27,9 +91,11 @@ def infer_domain(job_title: str) -> str:
     for domain, keywords in _DOMAIN_KEYWORDS.items():
         if any(kw in t for kw in keywords):
             return domain
-    return 'general'
+    return "general"
+
 
 # ── TTS to disk ───────────────────────────────────────────────────────────────
+
 
 def generate_and_store_tts(text: str, audio_path: str, voice: str = "nova") -> bool:
     """Generate TTS audio via OpenAI and save to disk. Returns True on success."""
@@ -38,6 +104,7 @@ def generate_and_store_tts(text: str, audio_path: str, voice: str = "nova") -> b
         return False
     try:
         from openai import OpenAI
+
         client = OpenAI(api_key=api_key)
         response = client.audio.speech.create(
             model="tts-1",
@@ -51,20 +118,44 @@ def generate_and_store_tts(text: str, audio_path: str, voice: str = "nova") -> b
         print(f"[TTS] Failed to generate audio for path {audio_path}: {e}")
         return False
 
+
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
-DIFFICULTY_LABELS = {1: "intern/entry-level", 2: "junior", 3: "mid-level", 4: "senior", 5: "staff/principal"}
-SENIORITY_LABELS = {"junior": "junior engineer", "mid": "mid-level engineer", "senior": "senior engineer", "staff": "staff/principal engineer"}
+DIFFICULTY_LABELS = {
+    1: "intern/entry-level",
+    2: "junior",
+    3: "mid-level",
+    4: "senior",
+    5: "staff/principal",
+}
+SENIORITY_LABELS = {
+    "junior": "junior engineer",
+    "mid": "mid-level engineer",
+    "senior": "senior engineer",
+    "staff": "staff/principal engineer",
+}
+
 
 def _client():
     if not ANTHROPIC_API_KEY or ANTHROPIC_API_KEY == "your-key-here":
         return None
     import anthropic
+
     return anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-def generate_questions(resume_text: str, job_description: str, difficulty: int, num_questions: int, hardcoded: Optional[list]) -> list:
+
+def generate_questions(
+    resume_text: str,
+    job_description: str,
+    difficulty: int,
+    num_questions: int,
+    hardcoded: Optional[list],
+) -> list:
     if hardcoded:
-        return [{"question": q, "topic": "custom", "expected_depth": "as specified"} for q in hardcoded]
+        return [
+            {"question": q, "topic": "custom", "expected_depth": "as specified"}
+            for q in hardcoded
+        ]
 
     client = _client()
     if not client:
@@ -74,10 +165,10 @@ def generate_questions(resume_text: str, job_description: str, difficulty: int, 
     prompt = f"""You are a technical interviewer assembling a question set for a structured interview.
 
 Job Description:
-{job_description}
+{truncate_text(job_description)}
 
 Candidate Resume:
-{resume_text}
+{truncate_text(resume_text)}
 
 Difficulty level: {level} (difficulty {difficulty}/5)
 
@@ -96,11 +187,16 @@ Generate exactly {num_questions} interview questions following these rules:
 Return ONLY a JSON array like:
 [{{"question": "...", "voice_text": "...", "topic": "...", "expected_depth": "..."}}]"""
 
-    resp = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
-        max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}]
-    )
+    @_claude_retry()
+    def _call_api():
+        return client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+            timeout=30.0,
+        )
+
+    resp = _call_api()
     text = resp.content[0].text.strip()
     start, end = text.find("["), text.rfind("]") + 1
     questions = json.loads(text[start:end])
@@ -118,21 +214,32 @@ Return ONLY a JSON array like:
             deduped.append(q)
     return deduped[:num_questions]
 
-def evaluate_answer(question: str, answer: str, job_description: str, seniority_bar: str, hardcoded_answer: Optional[str]) -> dict:
+
+def evaluate_answer(
+    question: str,
+    answer: str,
+    job_description: str,
+    seniority_bar: str,
+    hardcoded_answer: Optional[str],
+) -> dict:
     client = _client()
     if not client:
         return _mock_evaluation()
 
     bar = SENIORITY_LABELS.get(seniority_bar, "senior engineer")
-    bar_context = f"hardcoded expected answer: {hardcoded_answer}" if hardcoded_answer else f"expected bar: {bar} level at a top tech company"
+    bar_context = (
+        f"hardcoded expected answer: {hardcoded_answer}"
+        if hardcoded_answer
+        else f"expected bar: {bar} level at a top tech company"
+    )
 
     prompt = f"""You are a technical interviewer evaluating a candidate's answer.
 
-Job Description: {job_description}
+Job Description: {truncate_text(job_description)}
 
-Question: {question}
+Question: {truncate_text(question)}
 
-Candidate's Answer: {answer}
+Candidate's Answer: {truncate_text(answer)}
 
 Evaluation bar: {bar_context}
 
@@ -145,34 +252,42 @@ Evaluate strictly. Return ONLY JSON:
   "what_was_missing": "..."
 }}"""
 
-    resp = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=800,
-        messages=[{"role": "user", "content": prompt}]
-    )
+    @_claude_retry()
+    def _call_api():
+        return client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=800,
+            messages=[{"role": "user", "content": prompt}],
+            timeout=30.0,
+        )
+
+    resp = _call_api()
     text = resp.content[0].text.strip()
     start, end = text.find("{"), text.rfind("}") + 1
     return json.loads(text[start:end])
+
 
 def generate_report(job_description: str, resume_text: str, qa_pairs: list) -> dict:
     client = _client()
     if not client:
         return _mock_report()
 
-    qa_text = "\n\n".join([
-        f"Q: {item['question']}\nA: {item['answer']}\nScore: {item['score']}/100\nFeedback: {item['feedback']}"
-        for item in qa_pairs
-    ])
+    qa_text = "\n\n".join(
+        [
+            f"Q: {item['question']}\nA: {item['answer']}\nScore: {item['score']}/100\nFeedback: {item['feedback']}"
+            for item in qa_pairs
+        ]
+    )
     avg = sum(i["score"] for i in qa_pairs) / len(qa_pairs) if qa_pairs else 0
 
     prompt = f"""You are a senior technical interviewer writing a hiring report.
 
-Job Description: {job_description}
+Job Description: {truncate_text(job_description)}
 
-Resume: {resume_text}
+Resume: {truncate_text(resume_text)}
 
 Interview Q&A:
-{qa_text}
+{truncate_text(qa_text, 8000)}
 
 Average score: {avg:.1f}/100
 
@@ -189,14 +304,20 @@ Write a comprehensive hiring report. Return ONLY JSON:
   ]
 }}"""
 
-    resp = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
-        max_tokens=3000,
-        messages=[{"role": "user", "content": prompt}]
-    )
+    @_claude_retry()
+    def _call_api():
+        return client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=3000,
+            messages=[{"role": "user", "content": prompt}],
+            timeout=30.0,
+        )
+
+    resp = _call_api()
     text = resp.content[0].text.strip()
     start, end = text.find("{"), text.rfind("}") + 1
     return json.loads(text[start:end])
+
 
 def generate_coding_question(job_description: str) -> dict:
     """Generate a single logic-based coding question. Language-agnostic, solvable in pseudocode."""
@@ -220,11 +341,16 @@ Rules:
 Return ONLY a single JSON object:
 {{"question": "...", "voice_text": "...", "topic": "Coding", "type": "coding"}}"""
 
-    resp = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=800,
-        messages=[{"role": "user", "content": prompt}]
-    )
+    @_claude_retry()
+    def _call_api():
+        return client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=800,
+            messages=[{"role": "user", "content": prompt}],
+            timeout=30.0,
+        )
+
+    resp = _call_api()
     text = resp.content[0].text.strip()
     start, end = text.find("{"), text.rfind("}") + 1
     q = json.loads(text[start:end])
@@ -243,27 +369,93 @@ def _mock_coding_question() -> dict:
 
 # ── Mock responses when no API key ─────────────────────────────
 
+
 def _mock_questions(n: int) -> list:
     samples = [
-        {"question": "Explain how you would design a thread-safe singleton in iOS.", "voice_text": "Can you walk me through how you'd design a thread-safe singleton in iOS?", "topic": "Concurrency", "expected_depth": "Knows DispatchQueue, NSLock approaches"},
-        {"question": "What is the difference between strong, weak, and unowned references?", "voice_text": "Can you explain the difference between strong, weak, and unowned references in Swift?", "topic": "Memory Management", "expected_depth": "ARC, retain cycles, when to use each"},
-        {"question": "How does UITableView reuse cells and why is it important?", "voice_text": "How does UITableView handle cell reuse, and why does that matter for performance?", "topic": "UIKit", "expected_depth": "dequeueReusableCell, memory efficiency"},
-        {"question": "Describe your approach to offline-first architecture in a mobile app.", "voice_text": "How would you approach building an offline-first mobile app? Walk me through your thinking.", "topic": "Architecture", "expected_depth": "Local DB, sync strategy, conflict resolution"},
-        {"question": "How would you optimize an app that scrolls poorly at 30fps?", "voice_text": "If an app was scrolling poorly at around 30 frames per second, how would you go about diagnosing and fixing that?", "topic": "Performance", "expected_depth": "Instruments, off-main-thread rendering, cell pre-sizing"},
-        {"question": "What are the trade-offs between SwiftUI and UIKit?", "voice_text": "Can you walk me through the main trade-offs between SwiftUI and UIKit, and when you'd pick one over the other?", "topic": "Frameworks", "expected_depth": "Maturity, interop, state management"},
-        {"question": "How do you handle API errors gracefully in production?", "voice_text": "How do you handle API errors gracefully in a production app?", "topic": "Networking", "expected_depth": "Retry logic, user feedback, logging"},
-        {"question": "Walk me through how you would architect a large-scale iOS app.", "voice_text": "How would you architect a large-scale iOS app? Walk me through your approach.", "topic": "System Design", "expected_depth": "Modularity, dependency injection, testability"},
+        {
+            "question": "Explain how you would design a thread-safe singleton in iOS.",
+            "voice_text": "Can you walk me through how you'd design a thread-safe singleton in iOS?",
+            "topic": "Concurrency",
+            "expected_depth": "Knows DispatchQueue, NSLock approaches",
+        },
+        {
+            "question": "What is the difference between strong, weak, and unowned references?",
+            "voice_text": "Can you explain the difference between strong, weak, and unowned references in Swift?",
+            "topic": "Memory Management",
+            "expected_depth": "ARC, retain cycles, when to use each",
+        },
+        {
+            "question": "How does UITableView reuse cells and why is it important?",
+            "voice_text": "How does UITableView handle cell reuse, and why does that matter for performance?",
+            "topic": "UIKit",
+            "expected_depth": "dequeueReusableCell, memory efficiency",
+        },
+        {
+            "question": "Describe your approach to offline-first architecture in a mobile app.",
+            "voice_text": "How would you approach building an offline-first mobile app? Walk me through your thinking.",
+            "topic": "Architecture",
+            "expected_depth": "Local DB, sync strategy, conflict resolution",
+        },
+        {
+            "question": "How would you optimize an app that scrolls poorly at 30fps?",
+            "voice_text": "If an app was scrolling poorly at around 30 frames per second, how would you go about diagnosing and fixing that?",
+            "topic": "Performance",
+            "expected_depth": "Instruments, off-main-thread rendering, cell pre-sizing",
+        },
+        {
+            "question": "What are the trade-offs between SwiftUI and UIKit?",
+            "voice_text": "Can you walk me through the main trade-offs between SwiftUI and UIKit, and when you'd pick one over the other?",
+            "topic": "Frameworks",
+            "expected_depth": "Maturity, interop, state management",
+        },
+        {
+            "question": "How do you handle API errors gracefully in production?",
+            "voice_text": "How do you handle API errors gracefully in a production app?",
+            "topic": "Networking",
+            "expected_depth": "Retry logic, user feedback, logging",
+        },
+        {
+            "question": "Walk me through how you would architect a large-scale iOS app.",
+            "voice_text": "How would you architect a large-scale iOS app? Walk me through your approach.",
+            "topic": "System Design",
+            "expected_depth": "Modularity, dependency injection, testability",
+        },
     ]
     return samples[:n]
 
+
 def _mock_evaluation() -> dict:
-    return {"score": 72, "pass": True, "feedback": "Mock evaluation — add API key for real feedback.", "what_was_good": "Answered the question", "what_was_missing": "More depth needed"}
+    return {
+        "score": 72,
+        "pass": True,
+        "feedback": "Mock evaluation — add API key for real feedback.",
+        "what_was_good": "Answered the question",
+        "what_was_missing": "More depth needed",
+    }
+
 
 def _mock_report() -> dict:
-    return {"overall_score": 72, "pass": True, "summary": "Mock report — add API key for real analysis.", "strengths": ["Communicates clearly"], "weaknesses": ["Needs more depth"], "hiring_recommendation": "Consider for next round.", "per_question": []}
+    return {
+        "overall_score": 72,
+        "pass": True,
+        "summary": "Mock report — add API key for real analysis.",
+        "strengths": ["Communicates clearly"],
+        "weaknesses": ["Needs more depth"],
+        "hiring_recommendation": "Consider for next round.",
+        "per_question": [],
+    }
 
 
-def generate_report_from_transcript(job_description: str, resume_text: str, questions: list, full_transcript: str, evaluation_prompt: str = "", code_answers: dict = None, draw_answers: list = None, proctoring_data: dict = None) -> dict:
+def generate_report_from_transcript(
+    job_description: str,
+    resume_text: str,
+    questions: list,
+    full_transcript: str,
+    evaluation_prompt: str = "",
+    code_answers: dict = None,
+    draw_answers: list = None,
+    proctoring_data: dict = None,
+) -> dict:
     client = _client()
     if not client:
         return _mock_report()
@@ -273,7 +465,7 @@ def generate_report_from_transcript(job_description: str, resume_text: str, ques
 
     questions_list = ""
     for i, q in enumerate(questions):
-        questions_list += f"Q{i+1}: {q['question']}"
+        questions_list += f"Q{i + 1}: {q['question']}"
         if q.get("type") == "coding":
             questions_list += "  [CODING QUESTION]"
         questions_list += "\n"
@@ -284,9 +476,13 @@ def generate_report_from_transcript(job_description: str, resume_text: str, ques
     if non_empty_code:
         code_section = "\n\nCode Submissions (from the code editor):\n"
         for idx_str, code in non_empty_code.items():
-            code_section += f"--- Q{int(idx_str)+1} Code Answer ---\n{code}\n---\n\n"
+            code_section += f"--- Q{int(idx_str) + 1} Code Answer ---\n{code}\n---\n\n"
 
-    guidelines = evaluation_prompt.strip() if evaluation_prompt.strip() else "Evaluate answers fairly based on technical correctness and depth. For skipped questions, score 0."
+    guidelines = (
+        evaluation_prompt.strip()
+        if evaluation_prompt.strip()
+        else "Evaluate answers fairly based on technical correctness and depth. For skipped questions, score 0."
+    )
 
     core_competency_guidelines = """
 For questions marked [CORE_COMPETENCY] in the transcript, also return a "core_competency_probes" array in that question's per_question entry: [{"question": "...", "candidate_answer": "...", "expected_answer": "...", "pass": true/false}]. Parse these from [PROBE_N: ...] markers in the transcript."""
@@ -310,7 +506,7 @@ For questions with submitted code:
     if non_empty_draws:
         draw_section = "\n\nDrawing Submissions (from the whiteboard canvas):\n"
         for idx, _ in non_empty_draws.items():
-            draw_section += f"- Q{idx+1}: Drawing submitted (see attached image)\n"
+            draw_section += f"- Q{idx + 1}: Drawing submitted (see attached image)\n"
         draw_eval_guidelines = """
 For questions with submitted drawings:
 - Analyze what the candidate drew: diagrams, flowcharts, architecture, data structures, etc.
@@ -352,7 +548,7 @@ Also add "ai_assist_notes" with a brief explanation of what you observed (or "No
         parts = []
         if events:
             event_lines = "\n".join(
-                f"  [{e.get('ts_label','?')}] {e.get('type','?')}: {e.get('detail','')}"
+                f"  [{e.get('ts_label', '?')}] {e.get('type', '?')}: {e.get('detail', '')}"
                 for e in events
             )
             parts.append(f"Proctoring Events:\n{event_lines}")
@@ -368,21 +564,23 @@ Also add "ai_assist_notes" with a brief explanation of what you observed (or "No
             parts.append(f"Face Detection Stats:\n{stat_lines}")
 
         if parts:
-            proctoring_section = "\n\nProctoring Data (for context):\n" + "\n\n".join(parts)
+            proctoring_section = "\n\nProctoring Data (for context):\n" + "\n\n".join(
+                parts
+            )
 
     prompt_text = f"""You are a senior technical interviewer writing a hiring evaluation report.
 
 Job Description:
-{job_description}
+{truncate_text(job_description)}
 
 Candidate Resume:
-{resume_text}
+{truncate_text(resume_text)}
 
 Interview Questions:
-{questions_list}
+{truncate_text(questions_list, 5000)}
 
 Full Interview Transcript (questions marked with [Q1:], [Q2:] etc, [SKIPPED] means candidate skipped):
-{full_transcript}{code_section}{draw_section}{proctoring_section}
+{truncate_text(full_transcript)}{code_section[:2000] if code_section else ""}{draw_section}{proctoring_section}
 
 Evaluation guidelines:
 {guidelines}{code_eval_guidelines}{draw_eval_guidelines}{core_competency_guidelines}{ai_assist_guidelines}
@@ -408,9 +606,7 @@ Return ONLY valid JSON in this exact format:
       "score": <0-100>,
       "feedback": "...",
       "what_was_good": "...",
-      "what_was_missing": "...",
-      "code_analysis": "...",
-      "draw_analysis": "..."
+      "what_was_missing": "..."
     }}
   ]
 }}
@@ -421,20 +617,33 @@ For "proctoring_summary": if no proctoring events were logged, set risk_level to
     if non_empty_draws:
         content_blocks = [{"type": "text", "text": prompt_text}]
         for idx, b64_png in non_empty_draws.items():
-            content_blocks.append({"type": "text", "text": f"\n--- Q{idx+1} Drawing ---"})
-            content_blocks.append({
-                "type": "image",
-                "source": {"type": "base64", "media_type": "image/png", "data": b64_png}
-            })
+            content_blocks.append(
+                {"type": "text", "text": f"\n--- Q{idx + 1} Drawing ---"}
+            )
+            content_blocks.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": b64_png,
+                    },
+                }
+            )
         message_content = content_blocks
     else:
         message_content = prompt_text
 
-    resp = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
-        max_tokens=3000,
-        messages=[{"role": "user", "content": message_content}]
-    )
+    @_claude_retry()
+    def _call_api():
+        return client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=3000,
+            messages=[{"role": "user", "content": message_content}],
+            timeout=30.0,
+        )
+
+    resp = _call_api()
     text = resp.content[0].text.strip()
     start, end = text.find("{"), text.rfind("}") + 1
     result = json.loads(text[start:end])
@@ -451,9 +660,13 @@ For "proctoring_summary": if no proctoring events were logged, set risk_level to
 
     return result
 
+
 # ── Behavioral question generation ────────────────────────────────────────────
 
-def generate_behavioral_questions(resume_text: str, job_description: str, num_questions: int) -> list:
+
+def generate_behavioral_questions(
+    resume_text: str, job_description: str, num_questions: int
+) -> list:
     """Generate behavioral/resume-based questions tailored to a specific candidate."""
     if num_questions <= 0:
         return []
@@ -465,10 +678,10 @@ def generate_behavioral_questions(resume_text: str, job_description: str, num_qu
     prompt = f"""You are a skilled behavioral interviewer generating questions for a specific candidate.
 
 Job Description:
-{job_description}
+{truncate_text(job_description)}
 
 Candidate Resume:
-{resume_text}
+{truncate_text(resume_text)}
 
 Generate exactly {num_questions} behavioral interview questions tailored to THIS candidate's specific background.
 
@@ -482,11 +695,16 @@ Rules:
 Return ONLY a JSON array:
 [{{"question": "...", "voice_text": "...", "topic": "Behavioral", "type": "behavioral"}}]"""
 
-    resp = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1500,
-        messages=[{"role": "user", "content": prompt}]
-    )
+    @_claude_retry()
+    def _call_api():
+        return client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}],
+            timeout=30.0,
+        )
+
+    resp = _call_api()
     text = resp.content[0].text.strip()
     start, end = text.find("["), text.rfind("]") + 1
     questions = json.loads(text[start:end])
@@ -504,9 +722,9 @@ def generate_probes(question: str, topic: str, job_description: str) -> list:
 
     prompt = f"""You are a technical interviewer generating follow-up probe questions for a core competency question.
 
-Main Question: {question}
+Main Question: {truncate_text(question)}
 Topic: {topic}
-Job Description: {job_description}
+Job Description: {truncate_text(job_description)}
 
 Generate exactly 2 probe questions that:
 1. Each probe must have a narrow, verifiable expected answer (short text or binary yes/no)
@@ -527,11 +745,16 @@ Return ONLY a JSON array with exactly 2 items, each with this structure:
   }}
 ]"""
 
-    resp = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1200,
-        messages=[{"role": "user", "content": prompt}]
-    )
+    @_claude_retry()
+    def _call_api():
+        return client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1200,
+            messages=[{"role": "user", "content": prompt}],
+            timeout=30.0,
+        )
+
+    resp = _call_api()
     text = resp.content[0].text.strip()
     start, end = text.find("["), text.rfind("]") + 1
     return json.loads(text[start:end])
@@ -546,7 +769,7 @@ def _mock_probes() -> list:
             "code_snippet": None,
             "expected_answer": "Detailed explanation of the mechanism",
             "acceptance_criteria": "Candidate demonstrates understanding beyond surface-level knowledge",
-            "answer_type": "short_text"
+            "answer_type": "short_text",
         },
         {
             "question": "What would happen if this constraint were removed?",
@@ -555,12 +778,14 @@ def _mock_probes() -> list:
             "code_snippet": None,
             "expected_answer": "Identifies the consequence of removing the constraint",
             "acceptance_criteria": "Candidate can reason about edge cases and system behavior",
-            "answer_type": "short_text"
-        }
+            "answer_type": "short_text",
+        },
     ]
 
 
-def assess_answer_depth(question: str, answer: str, job_description: str, seniority_bar: str) -> dict:
+def assess_answer_depth(
+    question: str, answer: str, job_description: str, seniority_bar: str
+) -> dict:
     """Fast assessment: does the candidate's answer have enough signal to skip probes?"""
     client = _client()
     if not client:
@@ -570,9 +795,9 @@ def assess_answer_depth(question: str, answer: str, job_description: str, senior
 
     prompt = f"""You are a technical interviewer doing a quick depth check on a candidate's answer.
 
-Question: {question}
-Candidate's Answer: {answer}
-Job Description: {job_description}
+Question: {truncate_text(question)}
+Candidate's Answer: {truncate_text(answer)}
+Job Description: {truncate_text(job_description)}
 Seniority bar: {bar}
 
 Rules:
@@ -583,11 +808,16 @@ Rules:
 Return ONLY JSON:
 {{"needs_probing": true/false, "reason": "brief explanation"}}"""
 
-    resp = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=300,
-        messages=[{"role": "user", "content": prompt}]
-    )
+    @_claude_retry()
+    def _call_api():
+        return client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+            timeout=30.0,
+        )
+
+    resp = _call_api()
     text = resp.content[0].text.strip()
     start, end = text.find("{"), text.rfind("}") + 1
     return json.loads(text[start:end])
@@ -595,8 +825,23 @@ Return ONLY JSON:
 
 def _mock_behavioral_questions(n: int) -> list:
     samples = [
-        {"question": "Tell me about a time when you had to debug a critical production issue under pressure.", "voice_text": "Can you walk me through a time when you had to debug a critical production issue under pressure? What did you do?", "topic": "Behavioral", "type": "behavioral"},
-        {"question": "Describe a situation where you had to push back on a technical decision made by your manager.", "voice_text": "Tell me about a situation where you disagreed with a technical decision made by your manager. How did you handle it?", "topic": "Behavioral", "type": "behavioral"},
-        {"question": "Tell me about a time you mentored or helped a junior team member grow.", "voice_text": "Can you tell me about a time when you helped a junior teammate grow or improve their skills?", "topic": "Behavioral", "type": "behavioral"},
+        {
+            "question": "Tell me about a time when you had to debug a critical production issue under pressure.",
+            "voice_text": "Can you walk me through a time when you had to debug a critical production issue under pressure? What did you do?",
+            "topic": "Behavioral",
+            "type": "behavioral",
+        },
+        {
+            "question": "Describe a situation where you had to push back on a technical decision made by your manager.",
+            "voice_text": "Tell me about a situation where you disagreed with a technical decision made by your manager. How did you handle it?",
+            "topic": "Behavioral",
+            "type": "behavioral",
+        },
+        {
+            "question": "Tell me about a time you mentored or helped a junior team member grow.",
+            "voice_text": "Can you tell me about a time when you helped a junior teammate grow or improve their skills?",
+            "topic": "Behavioral",
+            "type": "behavioral",
+        },
     ]
     return samples[:n]
