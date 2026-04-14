@@ -249,14 +249,35 @@ def synthesize_speech(req: TTSRequest):
 
 @tts_router.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
-    """Transcribe audio via OpenAI Whisper-1. Used for iOS/mobile where
-    Web Speech API recognition is unavailable (Chrome iOS, Safari iOS)."""
-    if not OPENAI_API_KEY:
-        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+    """
+    Transcribe audio using the best available STT provider:
+      1. Wispr Flow (if WISPR_API_KEY is set) — higher quality, auto-edits
+      2. OpenAI Whisper (fallback if Wispr unavailable)
+
+    Used for candidate interview responses on all platforms.
+    """
     audio_bytes = await file.read()
     if not audio_bytes:
         raise HTTPException(status_code=400, detail="Empty audio file")
     content_type = file.content_type or "audio/webm"
+
+    # ── Try Wispr Flow first ───────────────────────────────────────────────
+    from .wispr_client import is_wispr_configured, transcribe_with_wispr_rest
+    if is_wispr_configured():
+        try:
+            text = transcribe_with_wispr_rest(audio_bytes, content_type)
+            if text.strip():
+                return {"text": text, "provider": "wispr_flow"}
+            print("[STT] Wispr returned empty, falling back to Whisper")
+        except Exception as e:
+            print(f"[STT] Wispr failed ({e}), falling back to Whisper")
+
+    # ── Fallback: OpenAI Whisper ───────────────────────────────────────────
+    if not OPENAI_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="No STT provider configured. Set WISPR_API_KEY or OPENAI_API_KEY in .env"
+        )
     ext = "m4a" if ("mp4" in content_type or "m4a" in content_type) else "webm"
     from openai import OpenAI
     client = OpenAI(api_key=OPENAI_API_KEY)
@@ -270,14 +291,25 @@ async def transcribe_audio(file: UploadFile = File(...)):
                 result = client.audio.transcriptions.create(model="whisper-1", file=f)
             text = result.text or ""
             if text.strip() or attempt == 1:
-                return {"text": text}
+                return {"text": text, "provider": "openai_whisper"}
             _time.sleep(0.5)
-        return {"text": ""}
+        return {"text": "", "provider": "openai_whisper"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
     finally:
         try: os.unlink(tmp_path)
         except: pass
+
+
+@tts_router.get("/stt-status")
+def stt_status():
+    """Check which STT provider is active."""
+    from .wispr_client import is_wispr_configured
+    return {
+        "wispr_flow": is_wispr_configured(),
+        "openai_whisper": bool(OPENAI_API_KEY),
+        "active_provider": "wispr_flow" if is_wispr_configured() else "openai_whisper" if OPENAI_API_KEY else "none",
+    }
 
 
 # ── Sessions ───────────────────────────────────────────────────────────────────

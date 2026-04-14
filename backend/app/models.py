@@ -82,6 +82,7 @@ class Job(Base):
     interview_difficulty      = Column(Integer, default=3)
     interview_seniority       = Column(String(20), default="mid")
     interview_behavioral_pct  = Column(Integer, default=20)   # % of questions that are behavioral
+    is_urgent             = Column(Boolean, default=False)
     auto_invite_screening     = Column(Boolean, default=False)
     auto_invite_threshold     = Column(Integer, default=75)
 
@@ -208,3 +209,21 @@ class ActivityLog(Base):
     details = Column(Text, nullable=True)  # JSON string
     ip_address = Column(String(50), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SupportRequest(Base):
+    __tablename__ = "support_requests"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    subject = Column(String(255), nullable=False)
+    message = Column(Text, nullable=False)
+    category = Column(String(50), default="technical")  # technical, billing, feature_request, other
+    priority = Column(String(50), default="medium")     # low, medium, high
+    status = Column(String(50), default="pending")      # pending, in_progress, resolved
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    user = relationship("User")
+

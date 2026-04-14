@@ -73,7 +73,7 @@ const ScreeningDrawer = ({ screening, onClose, onAction }) => {
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex justify-end" onClick={onClose}>
-      <div className="w-full max-w-lg bg-white h-full overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+      <div className="w-full max-w-lg bg-white h-full overflow-y-auto shadow-2xl animate-slide-in-right" onClick={e => e.stopPropagation()}>
         <div className="sticky top-0 bg-white border-b border-slate-100 px-6 py-4 flex items-center justify-between z-10">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Screening Report</h2>
@@ -206,11 +206,14 @@ const CandidateRow = ({ s, onSelect, onReinvite }) => (
 /* ─── Job accordion card ──────────────────────────────────────────────────── */
 const JobCard = ({ group, onSelect, onReinvite }) => {
   const [open, setOpen] = useState(true);
-  const ss = group.screenings;
+  const [sortStatus, setSortStatus] = useState('');
+  const allSs = group.screenings;
+  const ss = sortStatus ? allSs.filter(s => s.status === sortStatus) : allSs;
   const counts = {
-    scheduled:   ss.filter(s => s.status === 'scheduled').length,
-    in_progress: ss.filter(s => s.status === 'in_progress').length,
-    completed:   ss.filter(s => s.status === 'completed').length,
+    scheduled:   allSs.filter(s => s.status === 'scheduled').length,
+    in_progress: allSs.filter(s => s.status === 'in_progress').length,
+    completed:   allSs.filter(s => s.status === 'completed').length,
+    cancelled:   allSs.filter(s => s.status === 'cancelled').length,
   };
 
   return (

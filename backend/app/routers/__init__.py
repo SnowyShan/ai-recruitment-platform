@@ -5,6 +5,7 @@ from .applications import router as applications_router
 from .screening import router as screening_router
 from .dashboard import router as dashboard_router
 from .public import router as public_router
+from .support import router as support_router
 
 __all__ = [
     "auth_router",
@@ -14,4 +15,6 @@ __all__ = [
     "screening_router",
     "dashboard_router",
     "public_router",
+    "support_router",
 ]
+

@@ -113,6 +113,10 @@
     @apply bg-sky-100 text-sky-700;
   }
 
+  .badge-secondary {
+    @apply bg-slate-100 text-slate-600;
+  }
+
   .stat-card {
     @apply card p-6 relative overflow-hidden;
   }
@@ -179,6 +183,23 @@
   .animate-in {
     animation: animateIn 0.3s ease-out;
   }
+.animate-fade-in {
+    animation: fadeIn 0.35s ease-out both;
+  }
+
+  .animate-slide-in-right {
+    animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0);   }
+  }
+
+  @keyframes slideInRight {
+    from { opacity: 0; transform: translateX(40px); }
+    to   { opacity: 1; transform: translateX(0);    }
+  }
 
   @keyframes animateIn {
     from {
@@ -224,4 +245,20 @@
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
+}
+
+/* ── Modal overlay fix ────────────────────────────────────────────────────
+   Forces all modal backdrops (fixed inset-0 z-50) to scroll vertically
+   and align content to top so tall modals are never clipped.
+   ──────────────────────────────────────────────────────────────────────── */
+.fixed.inset-0.z-50 {
+  overflow-y: auto !important;
+  align-items: flex-start !important;
+  padding-top: 2rem !important;
+  padding-bottom: 2rem !important;
+}
+
+.fixed.inset-0.z-50 > div {
+  overflow: visible !important;
+  max-height: none !important;
 }

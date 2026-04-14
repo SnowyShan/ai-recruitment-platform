@@ -118,6 +118,10 @@ export const dashboardAPI = {
   getRecentApplications: (params) => api.get('/api/dashboard/recent-applications', { params }),
   getScreeningPerformance: (params) => api.get('/api/dashboard/screening-performance', { params }),
   getHiringFunnel: (params) => api.get('/api/dashboard/hiring-funnel', { params }),
+  getTopCandidates: (params) => api.get('/api/dashboard/top-candidates', { params }),
+  getInsights: () => api.get('/api/dashboard/insights'),
+  getWeeklyTrend: (params) => api.get('/api/dashboard/weekly-trend', { params }),
+  getNotifications: () => api.get('/api/dashboard/notifications'),
 };
 
 // Public API (no auth token)
@@ -130,4 +134,11 @@ export const publicAPI = {
   getStatus: (email) => publicApi.get('/api/public/status', { params: { email } }),
 };
 
+// Support API
+export const supportAPI = {
+  create: (data) => api.post('/api/support/', data),
+  getMyRequests: () => api.get('/api/support/my-requests'),
+};
+
 export default api;
+

@@ -92,7 +92,7 @@ async def get_applications(
     search: Optional[str] = None,
     min_score: Optional[float] = None,
     skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(50, ge=1, le=500),
     current_user: models.User = Depends(auth.get_current_user),
     db: Session = Depends(get_db)
 ):

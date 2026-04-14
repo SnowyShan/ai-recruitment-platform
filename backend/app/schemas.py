@@ -101,6 +101,8 @@ class JobCreate(JobBase):
     selected_question_ids: Optional[list] = []  # pre-selected from question bank
     auto_invite_screening: Optional[bool] = False
     auto_invite_threshold: Optional[int] = 75
+    is_urgent: Optional[bool] = False
+    is_urgent: Optional[bool] = False
 
 
 class JobUpdate(BaseModel):
@@ -126,6 +128,7 @@ class JobUpdate(BaseModel):
     selected_question_ids: Optional[list] = None  # passed when triggering re-setup
     auto_invite_screening: Optional[bool] = None
     auto_invite_threshold: Optional[int] = None
+    is_urgent: Optional[bool] = None
 
 
 class JobResponse(JobBase):
@@ -144,6 +147,7 @@ class JobResponse(JobBase):
     setup_status: Optional[str] = None
     auto_invite_screening: Optional[bool] = False
     auto_invite_threshold: Optional[int] = 75
+    is_urgent: Optional[bool] = False
 
     class Config:
         from_attributes = True
@@ -328,3 +332,27 @@ class InterviewQuestionResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+# Support Request Schemas
+class SupportRequestBase(BaseModel):
+    subject: str
+    message: str
+    category: Optional[str] = "technical"
+    priority: Optional[str] = "medium"
+
+
+class SupportRequestCreate(SupportRequestBase):
+    pass
+
+
+class SupportRequestResponse(SupportRequestBase):
+    id: int
+    user_id: Optional[int] = None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
