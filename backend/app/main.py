@@ -14,7 +14,7 @@ from .routers import (
     screening_router,
     dashboard_router,
     public_router,
-    settings_router,
+    support_router,
 )
 from .routers.rate_limit import RateLimiter, get_remote_address
 
@@ -42,6 +42,15 @@ async def lifespan(app: FastAPI):
                         "ALTER TABLE screenings ADD COLUMN source VARCHAR(20) DEFAULT 'manual'"
                     )
                 )
+                
+        if "jobs" in insp.get_table_names():
+            cols = [c["name"] for c in insp.get_columns("jobs")]
+            if "auto_invite_screening" not in cols:
+                conn.execute(text("ALTER TABLE jobs ADD COLUMN auto_invite_screening BOOLEAN DEFAULT 0"))
+            if "auto_invite_threshold" not in cols:
+                conn.execute(text("ALTER TABLE jobs ADD COLUMN auto_invite_threshold INTEGER DEFAULT 75"))
+            if "is_urgent" not in cols:
+                conn.execute(text("ALTER TABLE jobs ADD COLUMN is_urgent BOOLEAN DEFAULT 0"))
 
     # Create uploads directory
     upload_dir = os.getenv("UPLOAD_DIR", "./uploads")
@@ -103,7 +112,7 @@ app.include_router(applications_router)
 app.include_router(screening_router)
 app.include_router(dashboard_router)
 app.include_router(public_router)
-app.include_router(settings_router)
+app.include_router(support_router)
 
 
 @app.get("/")

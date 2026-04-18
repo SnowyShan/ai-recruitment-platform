@@ -61,7 +61,7 @@ def _trigger_job_setup(job: models.Job, selected_question_ids: list = None, gene
 router = APIRouter(prefix="/api/jobs", tags=["Jobs"])
 
 
-@router.post("/", response_model=schemas.JobResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=schemas.JobResponse, status_code=status.HTTP_201_CREATED)
 async def create_job(
     job_data: schemas.JobCreate,
     current_user: models.User = Depends(auth.get_current_user),
@@ -94,7 +94,7 @@ async def create_job(
     return new_job
 
 
-@router.get("/", response_model=List[schemas.JobResponse])
+@router.get("", response_model=List[schemas.JobResponse])
 async def get_jobs(
     status: Optional[str] = None,
     search: Optional[str] = None,

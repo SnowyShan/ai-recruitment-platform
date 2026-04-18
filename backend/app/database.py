@@ -45,6 +45,7 @@ def run_migrations(engine):
         "ALTER TABLE jobs ADD COLUMN domain TEXT",
         "ALTER TABLE jobs ADD COLUMN setup_status TEXT",
         "ALTER TABLE jobs ADD COLUMN verify_coding_ability BOOLEAN DEFAULT 0",
+        "ALTER TABLE jobs ADD COLUMN is_urgent BOOLEAN DEFAULT 0",
     ]
     with engine.connect() as conn:
         for sql in migrations:

@@ -32,7 +32,6 @@ const Sidebar = ({ isOpen, onClose }) => {
   ];
 
   const bottomItems = [
-    { icon: Settings, label: 'Settings', path: '/settings' },
     { icon: HelpCircle, label: 'Help & Support', path: '/help' },
   ];
 

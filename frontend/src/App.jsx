@@ -13,7 +13,8 @@ import BrowseJobs from './pages/BrowseJobs';
 import ApplyJob from './pages/ApplyJob';
 import CandidateStatus from './pages/CandidateStatus';
 import JobDetail from './pages/JobDetail';
-import Settings from './pages/Settings';
+import Help from './pages/Help';
+
 
 function App() {
   return (
@@ -38,7 +39,6 @@ function App() {
             <Route path="/candidates" element={<Candidates />} />
             <Route path="/applications" element={<Applications />} />
             <Route path="/screenings" element={<Screenings />} />
-            <Route path="/settings" element={<Settings />} />
             <Route path="/help" element={<Help />} />
           </Route>
           
@@ -59,15 +59,6 @@ function App() {
 }
 
 // Simple placeholder pages
-const Help = () => (
-  <div className="space-y-6 animate-fade-in">
-    <h1 className="text-3xl font-bold text-slate-900">Help & Support</h1>
-    <div className="card p-8 text-center">
-      <p className="text-slate-500">Help documentation coming soon...</p>
-    </div>
-  </div>
-);
-
 const NotFound = () => (
   <div className="min-h-screen flex items-center justify-center bg-slate-50">
     <div className="text-center">

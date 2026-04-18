@@ -232,6 +232,8 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
     interview_behavioral_pct: 20,
     verify_coding_ability: false,
     video_interview_enabled: false,
+    auto_invite_screening: false,
+    auto_invite_threshold: 75,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -249,13 +251,14 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
   }, []);
 
   const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    const { name, value, type, checked } = e.target;
+    const val = type === 'checkbox' ? checked : value;
+    setFormData(prev => ({ ...prev, [name]: val }));
 
     // When title changes, debounce a question bank fetch
     if (name === 'title') {
       clearTimeout(titleDebounceRef.current);
-      titleDebounceRef.current = setTimeout(() => loadBankQuestions(value), 600);
+      titleDebounceRef.current = setTimeout(() => loadBankQuestions(val), 600);
     }
   };
 
@@ -312,6 +315,8 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
         verify_coding_ability: !!formData.verify_coding_ability,
         video_interview_enabled: !!formData.video_interview_enabled,
         selected_question_ids: selectedQIds,
+        auto_invite_screening: formData.auto_invite_screening,
+        auto_invite_threshold: parseInt(formData.auto_invite_threshold) || 75,
       };
       await jobsAPI.create(data);
       onSuccess();
@@ -486,6 +491,53 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
                     )}
                   </div>
                 )}
+                {bankLoading && bankQuestions.length === 0 && (
+                  <p className="text-xs text-slate-400">Searching question bank…</p>
+                )}
+                
+                {/* Screening Automation Configuration */}
+                <div className="pt-4 border-t border-slate-200 mt-4 space-y-3">
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={formData.auto_invite_screening}
+                      onClick={() => setFormData(prev => ({ ...prev, auto_invite_screening: !prev.auto_invite_screening }))}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        formData.auto_invite_screening ? 'bg-primary-600' : 'bg-slate-300'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          formData.auto_invite_screening ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                    <span className="text-sm font-medium text-slate-700">
+                      Auto-invite to screening
+                    </span>
+                  </label>
+                  
+                  {formData.auto_invite_screening && (
+                    <div className="space-y-1 pl-14">
+                      <label className="block text-sm font-medium text-slate-700">
+                        Minimum resume match score (%)
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        name="auto_invite_threshold"
+                        value={formData.auto_invite_threshold}
+                        onChange={handleChange}
+                        className="w-28 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      />
+                      <p className="text-xs text-slate-400">
+                        Candidates scoring at or above this will be invited to interview.
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>

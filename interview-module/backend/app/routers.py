@@ -565,6 +565,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
 
     if not OPENAI_API_KEY:
         raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+
     audio_bytes = await file.read()
     if not audio_bytes:
         raise HTTPException(status_code=400, detail="Empty audio file")
@@ -577,6 +578,24 @@ async def transcribe_audio(file: UploadFile = File(...)):
         )
 
     content_type = file.content_type or "audio/webm"
+
+    # ── Try Wispr Flow first ───────────────────────────────────────────────
+    from .wispr_client import is_wispr_configured, transcribe_with_wispr_rest
+    if is_wispr_configured():
+        try:
+            text = transcribe_with_wispr_rest(audio_bytes, content_type)
+            if text.strip():
+                return {"text": text, "provider": "wispr_flow"}
+            print("[STT] Wispr returned empty, falling back to Whisper")
+        except Exception as e:
+            print(f"[STT] Wispr failed ({e}), falling back to Whisper")
+
+    # ── Fallback: OpenAI Whisper ───────────────────────────────────────────
+    if not OPENAI_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="No STT provider configured. Set WISPR_API_KEY or OPENAI_API_KEY in .env"
+        )
     ext = "m4a" if ("mp4" in content_type or "m4a" in content_type) else "webm"
     from openai import OpenAI
 
@@ -601,6 +620,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
         result = _transcribe()
         text = result.text or ""
         return {"text": text}
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
     finally:
@@ -608,6 +628,17 @@ async def transcribe_audio(file: UploadFile = File(...)):
             os.unlink(tmp_path)
         except:
             pass
+
+
+@tts_router.get("/stt-status")
+def stt_status():
+    """Check which STT provider is active."""
+    from .wispr_client import is_wispr_configured
+    return {
+        "wispr_flow": is_wispr_configured(),
+        "openai_whisper": bool(OPENAI_API_KEY),
+        "active_provider": "wispr_flow" if is_wispr_configured() else "openai_whisper" if OPENAI_API_KEY else "none",
+    }
 
 
 # ── Sessions ───────────────────────────────────────────────────────────────────
