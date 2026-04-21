@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { jobsAPI } from '../services/api';
 import axios from 'axios';
@@ -245,6 +246,10 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
   const [selectedQIds, setSelectedQIds] = useState([]);
   const titleDebounceRef = useRef(null);
 
+  // JD Generator state
+  const [jdPrompt, setJdPrompt] = useState('');
+  const [generating, setGenerating] = useState(false);
+
   // Load question bank on modal open (domain=general to show all available questions)
   useEffect(() => {
     loadBankQuestions('all');
@@ -302,6 +307,25 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
 
   const numTechnical = Math.max(1, Math.round(8 * (1 - formData.interview_behavioral_pct / 100)));
 
+  const generateDescription = async () => {
+    if (!jdPrompt.trim()) return;
+    setGenerating(true);
+    try {
+      const res = await fetch('http://localhost:8000/api/jobs/generate-description', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: jdPrompt })
+      });
+      const data = await res.json();
+      setFormData(prev => ({ ...prev, description: data.description }));
+    } catch (err) {
+      console.error('Failed to generate description:', err);
+      alert('Failed to generate description. Please try again.');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -327,14 +351,15 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
     }
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden animate-in">
+  return createPortal(
+    <div className="fixed inset-0 bg-black/60 overflow-y-auto" style={{zIndex:9999}}>
+      <div className="flex min-h-full items-center justify-center p-6">
+      <div className="bg-white rounded-2xl w-full max-w-2xl flex flex-col shadow-2xl">
         <div className="p-6 border-b border-slate-100 flex items-center justify-between">
           <h2 className="text-xl font-semibold text-slate-900">Create New Job</h2>
           <button onClick={onClose} className="p-2 rounded-lg hover:bg-slate-100"><X className="w-5 h-5" /></button>
         </div>
-        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto max-h-[calc(90vh-140px)]">
+        <form id="create-job-form" onSubmit={handleSubmit} className="p-6">
           {error && <div className="mb-4 p-4 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm">{error}</div>}
           <div className="space-y-5">
             <div>
@@ -383,6 +408,28 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
             </div>
             <div>
               <label className="label">Job Description *</label>
+              <div className="mb-3 p-3 bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 rounded-xl">
+                <label className="block text-sm font-medium text-slate-700 mb-1">✨ Generate with AI</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    className="input flex-1"
+                    placeholder='e.g. "Senior iOS Engineer, SwiftUI + on-device ML, 5+ years"'
+                    value={jdPrompt}
+                    onChange={e => setJdPrompt(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && generateDescription()}
+                  />
+                  <button
+                    type="button"
+                    onClick={generateDescription}
+                    disabled={generating}
+                    className="btn btn-primary whitespace-nowrap"
+                  >
+                    {generating ? '⏳ Generating...' : '✨ Generate'}
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">Or write your own description below</p>
+              </div>
               <textarea name="description" value={formData.description} onChange={handleChange} className="input min-h-[120px]" placeholder="Describe the role..." required />
             </div>
             <div>
@@ -542,15 +589,17 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 mt-6 pt-6 border-t border-slate-100">
+        </form>
+        <div className="flex items-center gap-3 px-6 pb-6 pt-4 border-t border-slate-100">
             <button type="button" onClick={onClose} className="btn btn-secondary flex-1">Cancel</button>
-            <button type="submit" disabled={loading} className="btn btn-primary flex-1">
+            <button type="submit" form="create-job-form" disabled={loading} className="btn btn-primary flex-1">
               {loading ? 'Creating…' : 'Create Job'}
             </button>
           </div>
-        </form>
       </div>
-    </div>
+      </div>
+    </div>,
+    document.body
   );
 };
 

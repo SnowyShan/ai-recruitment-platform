@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import { useParams, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
+import { CONVERSATIONAL_PROBES } from '../config'
 
 const ExcalidrawWrapper = lazy(() =>
   import('@excalidraw/excalidraw')
@@ -70,6 +71,15 @@ export default function Interview() {
   const probePhaseRef = useRef(null)
   const probeTranscriptsRef = useRef({})  // questionIndex -> [probeAnswer0, probeAnswer1, ...]
 
+  // Conversational probe state (feature-flagged)
+  const conversationalProbeIndexRef = useRef(0)  // which probe we're on (0 or 1)
+  const conversationalSignalResolvedRef = useRef(false)  // true once signal is strong enough
+  const analyserRef = useRef(null)
+  const silenceTimerRef = useRef(null)
+  const audioCtxRef = useRef(null)
+  const SILENCE_THRESHOLD = 10      // RMS amplitude (0-255), tune if needed
+  const SILENCE_DURATION_MS = 1800  // 1.8s of silence triggers probe check
+
   // Video interview state
   const [videoInterviewEnabled, setVideoInterviewEnabled] = useState(false)
   const videoRef = useRef(null)
@@ -88,7 +98,10 @@ export default function Interview() {
   const snapshotTimerRef = useRef(null)
   const faceCheckTimerRef = useRef(null)
   const [camReady, setCamReady] = useState(false)
-  const [identityPhotoCaptured, setIdentityPhotoCaptured] = useState(false)
+  // When proctoring is disabled, skip identity photo entirely
+  const [identityPhotoCaptured, setIdentityPhotoCaptured] = useState(
+    import.meta.env.VITE_DISABLE_PROCTORING === 'true'
+  )
   const [proctoringError, setProctoringError] = useState(null)
 
   // Face detection stats
@@ -155,6 +168,7 @@ export default function Interview() {
   //   'ready'    → mic granted/denied, "Start Interview" button shown, Q0 audio pre-fetching
   //   'started'  → interview running
   const [introPhase, setIntroPhase] = useState('intro')
+  const disableProctoring = import.meta.env.VITE_DISABLE_PROCTORING === 'true'
   const [startingInterview, setStartingInterview] = useState(false)
   const micReady  = introPhase === 'started'
   const started   = introPhase === 'started'
@@ -254,28 +268,34 @@ export default function Interview() {
       }
 
       // Load face-api.js + models inline — mandatory for proctoring
-      try {
-        if (!window.faceapi) {
-          await new Promise((resolve, reject) => {
-            const script = document.createElement('script')
-            script.src = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js'
-            script.onload = resolve
-            script.onerror = reject
-            document.head.appendChild(script)
-          })
+      // Skip face-api load in test/CI environments (VITE_DISABLE_PROCTORING=true)
+      if (!disableProctoring) {
+        try {
+          if (!window.faceapi) {
+            await new Promise((resolve, reject) => {
+              const script = document.createElement('script')
+              script.src = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js'
+              script.onload = resolve
+              script.onerror = reject
+              document.head.appendChild(script)
+            })
+          }
+          const faceapi = window.faceapi
+          const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model'
+          await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL)
+          await Promise.all([
+            faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+            faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+          ])
+          faceApiLoadedRef.current = true
+        } catch (_) {
+          setProctoringError("Face verification could not be initialized. Please use a supported browser (Chrome, Edge, or Safari) and ensure you have an active internet connection.")
+          setIntroPhase('ready')
+          return
         }
-        const faceapi = window.faceapi
-        const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model'
-        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL)
-        await Promise.all([
-          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-        ])
+      } else {
+        // Proctoring disabled — skip face-api, mark as loaded for test compatibility
         faceApiLoadedRef.current = true
-      } catch (_) {
-        setProctoringError("Face verification could not be initialized. Please use a supported browser (Chrome, Edge, or Safari) and ensure you have an active internet connection.")
-        setIntroPhase('ready')
-        return
       }
     } catch (_) {}
     setIntroPhase('ready')
@@ -675,10 +695,71 @@ export default function Interview() {
       mr.start(1000)
       mediaRecorderRef.current = mr
       setIsRecording(true)
+
+      // Start silence detection for conversational probes (if flag is ON)
+      if (CONVERSATIONAL_PROBES) {
+        startSilenceDetection(stream)
+      }
     } catch (err) {
       console.log('[Recording] failed to start:', err.message)
       setIsRecording(false)
     }
+  }
+
+  // ── Silence Detection for Conversational Probes ─────────────────────────────────
+
+  const startSilenceDetection = (stream) => {
+    if (!CONVERSATIONAL_PROBES) return
+    const q = questions[currentIndexRef.current]
+    if (!q?.is_core_competency) return
+
+    audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)()
+    const source = audioCtxRef.current.createMediaStreamSource(stream)
+    const analyser = audioCtxRef.current.createAnalyser()
+    analyser.fftSize = 512
+    source.connect(analyser)
+    analyserRef.current = analyser
+
+    const dataArray = new Uint8Array(analyser.frequencyBinCount)
+
+    const checkSilence = () => {
+      if (!analyserRef.current) return
+      analyserRef.current.getByteTimeDomainData(dataArray)
+      // Compute RMS
+      const rms = Math.sqrt(
+        dataArray.reduce((sum, v) => sum + (v - 128) ** 2, 0) / dataArray.length
+      )
+
+      if (rms < SILENCE_THRESHOLD) {
+        if (!silenceTimerRef.current) {
+          silenceTimerRef.current = setTimeout(() => {
+            stopSilenceDetection()
+            handleSilenceTrigger()
+          }, SILENCE_DURATION_MS)
+        }
+      } else {
+        // Sound detected — reset silence timer
+        if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current)
+          silenceTimerRef.current = null
+        }
+      }
+      requestAnimationFrame(checkSilence)
+    }
+
+    requestAnimationFrame(checkSilence)
+  }
+
+  const stopSilenceDetection = () => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current)
+      silenceTimerRef.current = null
+    }
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close()
+      audioCtxRef.current = null
+    }
+    analyserRef.current = null
   }
 
   // Stops current recording. Returns Promise<Blob|null>.
@@ -695,6 +776,10 @@ export default function Interview() {
       setIsRecording(false)
       const chunks = audioChunksRef.current
       audioChunksRef.current = []
+
+      // Stop silence detection
+      stopSilenceDetection()
+
       resolve(chunks.length ? new Blob(chunks, { type: audioMimeTypeRef.current }) : null)
     }
     try { mr.stop() } catch (_) { setIsRecording(false); resolve(null) }
@@ -837,7 +922,14 @@ export default function Interview() {
       return
     }
 
-    // Enter probe mode
+    // Bypass next-screen probe when CONVERSATIONAL_PROBES flag is ON
+    if (CONVERSATIONAL_PROBES) {
+      // Flag is ON, just advance — don't show probe on next screen
+      advance()
+      return
+    }
+
+    // Enter probe mode (only when flag is OFF)
     const probeState = { probes: q.probe_questions, probeIndex: 0 }
     probePhaseRef.current = probeState
     setProbePhase({ ...probeState })
@@ -846,6 +938,55 @@ export default function Interview() {
     speakProbeQuestion(q.probe_questions[0], questionIndex)
   }, [speakProbeQuestion, advance])
 
+  // ── Silence Trigger Handler for Conversational Probes ──────────────────────────────────
+
+  const handleSilenceTrigger = async () => {
+    if (!CONVERSATIONAL_PROBES) return
+    const idx = currentIndexRef.current
+    const q = questions[idx]
+    if (!q?.is_core_competency) return
+    if (conversationalSignalResolvedRef.current) return  // already got signal, don't re-probe
+
+    const probes = q.probe_questions || []
+    if (conversationalProbeIndexRef.current >= probes.length) return  // out of probes
+
+    // Stop current recording and transcribe
+    const blob = await stopRecording()
+    const text = await transcribeBlob(blob)
+
+    // Assess depth
+    try {
+      const res = await axios.post(`${API}/api/interview/probe-assess`, {
+        question: q.question,
+        answer: text,
+        job_description: state?.job_description || '',
+        seniority_bar: state?.seniority_bar || 'mid',
+      })
+
+      if (!res.data.needs_probing) {
+        // Signal is strong — mark resolved, let candidate tap Next when ready
+        conversationalSignalResolvedRef.current = true
+        return
+      }
+
+      // Signal weak — fire next probe inline
+      const probe = probes[conversationalProbeIndexRef.current]
+      conversationalProbeIndexRef.current += 1
+
+      // Append probe to transcript with [PROBE_N] marker
+      const existingTranscript = transcriptsRef.current[idx] || ''
+      transcriptsRef.current[idx] = existingTranscript + `\n[PROBE_${conversationalProbeIndexRef.current}: ${probe.question}]`
+
+      // Speak probe via TTS and restart recording
+      speakProbeQuestion(probe, idx)
+      // Note: startRecording() will be called after TTS finishes
+    } catch (e) {
+      console.error('[ConversationalProbes] assess failed', e)
+      // On error: just restart recording, let candidate continue
+      startRecording()
+    }
+  }
+
   const nextQuestion = async () => {
     cancelSpeech()
     const idx = currentIndexRef.current
@@ -853,17 +994,26 @@ export default function Interview() {
     const text = await transcribeBlob(blob)
     transcriptsRef.current[idx] = text
 
+    // Reset conversational probe state when advancing to a new question
+    conversationalProbeIndexRef.current = 0
+    conversationalSignalResolvedRef.current = false
+
     // If already in probe mode, delegate
     if (probePhaseRef.current) {
       await nextProbe()
       return
     }
 
-    // Core competency fork
+    // Core competency fork — bypass when CONVERSATIONAL_PROBES is enabled
     const q = questionsRef.current[idx]
     if (q?.is_core_competency && q?.probe_questions?.length > 0) {
-      await runCoreCompetencyProbes(text, idx)
-      return
+      if (!CONVERSATIONAL_PROBES) {
+        // Existing next-screen probe flow — only when flag is OFF
+        await runCoreCompetencyProbes(text, idx)
+        return
+      }
+      // CONVERSATIONAL_PROBES is ON: silence detection handles probing inline
+      // Just reset state and advance
     }
 
     // Regular path — unchanged
@@ -1097,7 +1247,8 @@ export default function Interview() {
           )}
 
           {/* Identity photo capture — shown after mic+camera granted */}
-          {!proctoringError && introPhase === 'ready' && camReady && !identityPhotoCaptured && (
+          {/* Skipped when VITE_DISABLE_PROCTORING=true (test/CI environments) */}
+          {!proctoringError && introPhase === 'ready' && camReady && !identityPhotoCaptured && !disableProctoring && (
             <div className="flex flex-col items-center gap-3">
               <p className="text-sm text-slate-600 text-center">Please look at the camera and take a quick photo to verify your identity.</p>
               <div className="relative w-48 h-36 rounded-xl overflow-hidden bg-slate-100 border border-slate-200">
@@ -1191,7 +1342,22 @@ export default function Interview() {
       {/* Header */}
       <div className="flex items-center justify-between mb-4 sm:mb-6">
         <div>
-          <p className="text-sm font-medium text-slate-500">Question {currentIndex + 1} of {questions.length}</p>
+          {/* Progress indicator with percentage */}
+          <div className="mb-2">
+            <div className="flex justify-between text-sm text-slate-500 mb-1">
+              <span>Question {currentIndex + 1} of {questions.length}</span>
+              <span data-testid="progress-label">{Math.round(((currentIndex + 1) / questions.length) * 100)}% complete</span>
+            </div>
+            <div className="w-full bg-slate-200 rounded-full h-2">
+              <div
+                data-testid="progress-bar"
+                className="bg-indigo-600 h-2 rounded-full transition-all duration-500"
+                style={{ width: `${((currentIndex + 1) / questions.length) * 100}%` }}
+              />
+            </div>
+          </div>
+          {/* Hidden question index for testing */}
+          <span data-testid="question-index" style={{display:'none'}}>{currentIndex + 1}</span>
           {/* Proctoring indicator — visible to candidate as deterrence */}
           <span className="inline-flex items-center gap-1 text-[10px] text-slate-400 mt-0.5 font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
@@ -1207,14 +1373,6 @@ export default function Interview() {
         <div className="text-right">
           <span className={`font-mono text-xl sm:text-2xl font-bold ${timerColor}`}>{formatTime(timeLeft)}</span>
         </div>
-      </div>
-
-      {/* Progress bar */}
-      <div className="w-full h-1.5 bg-slate-200 rounded-full mb-5 sm:mb-8">
-        <div
-          className="h-1.5 bg-primary-600 rounded-full transition-all duration-500"
-          style={{ width: `${progress}%` }}
-        />
       </div>
 
       {/* Question card */}
@@ -1261,7 +1419,24 @@ export default function Interview() {
         </div>
         {/* data-probe-active is a hidden test hook — not visible to candidates */}
         {probePhase && <span data-probe-active="true" style={{display:'none'}} />}
-        <p className="text-base sm:text-lg font-medium text-slate-800 leading-relaxed">
+        {/* Hidden probe banner for testing */}
+        {probePhase && <span data-testid="probe-banner" style={{display:'none'}}>Probe mode active</span>}
+        {/* Hidden question index for testing */}
+        <span data-testid="question-index" style={{display:'none'}}>{currentIndex}</span>
+        {/* Progress indicator */}
+        <div data-testid="progress-bar" className="mb-4">
+          <div className="flex justify-between text-sm text-slate-500 mb-1" data-testid="progress-label">
+            <span>Question {currentIndex + 1} of {questions.length}</span>
+            <span>{Math.round(((currentIndex + 1) / questions.length) * 100)}% complete</span>
+          </div>
+          <div className="w-full bg-slate-200 rounded-full h-2">
+            <div
+              className="bg-indigo-600 h-2 rounded-full transition-all duration-500"
+              style={{ width: `${((currentIndex + 1) / questions.length) * 100}%` }}
+            />
+          </div>
+        </div>
+        <p data-testid="question-text" className="text-base sm:text-lg font-medium text-slate-800 leading-relaxed">
           {probePhase
             ? (probePhase.probes[probePhase.probeIndex]?.question || '').split(/```/)[0].trim()
             : q.question
@@ -1385,14 +1560,14 @@ export default function Interview() {
 
       {/* Controls */}
       <div className="flex gap-2 sm:gap-3 mt-2">
-        <button onClick={nextQuestion} disabled={isTranscribing || isSpeaking}
+        <button data-testid="btn-next" onClick={nextQuestion} disabled={isTranscribing || isSpeaking}
           className="btn btn-primary flex-1 text-sm sm:text-base py-3 disabled:opacity-50">
           {probePhase
             ? (probePhase.probeIndex + 1 >= probePhase.probes.length && currentIndex + 1 >= questions.length ? 'Finish' : 'Next →')
             : (currentIndex + 1 >= questions.length ? 'Finish' : 'Next →')
           }
         </button>
-        <button onClick={skip} disabled={isTranscribing || isSpeaking}
+        <button data-testid="btn-skip" onClick={skip} disabled={isTranscribing || isSpeaking}
           className="btn btn-secondary px-4 sm:px-5 text-sm py-3 disabled:opacity-50">
           Skip
         </button>
