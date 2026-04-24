@@ -4,11 +4,11 @@ providers:
   - id: anthropic:messages:claude-haiku-4-5-20251001
     label: haiku
     config:
-      apiKey: 
+      apiKey: ${ANTHROPIC_API_KEY}
   - id: anthropic:messages:claude-sonnet-4-5-20250929
     label: sonnet
     config:
-      apiKey: 
+      apiKey: ${ANTHROPIC_API_KEY}
 
 prompts:
   - id: file://prompts/evaluate_answer.txt
