@@ -30,9 +30,13 @@ const Jobs = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const setupPollRef = useRef(null);
 
   useEffect(() => {
     loadJobs();
+    return () => {
+      if (setupPollRef.current) clearInterval(setupPollRef.current);
+    };
   }, [statusFilter]);
 
   const loadJobs = async () => {
@@ -41,14 +45,55 @@ const Jobs = () => {
       const params = {};
       if (statusFilter) params.status = statusFilter;
       if (searchTerm) params.search = searchTerm;
-      
+
       const response = await jobsAPI.getAll(params);
-      setJobs(response.data);
+      const fetchedJobs = response.data || [];
+      setJobs(fetchedJobs);
+
+      // If any jobs are still generating, poll until they complete
+      const generatingIds = fetchedJobs
+        .filter(j => j.setup_status === 'generating' || j.setup_status === null)
+        .map(j => j.id);
+
+      if (generatingIds.length > 0) {
+        startSetupPolling(generatingIds);
+      }
     } catch (error) {
       console.error('Failed to load jobs:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  const startSetupPolling = (jobIds) => {
+    // Clear any existing poll
+    if (setupPollRef.current) clearInterval(setupPollRef.current);
+
+    const remaining = new Set(jobIds);
+
+    setupPollRef.current = setInterval(async () => {
+      for (const jobId of [...remaining]) {
+        try {
+          const res = await jobsAPI.getSetupStatus(jobId);
+          const status = res.data?.setup_status || res.data?.status;
+          if (status === 'ready' || status === 'failed') {
+            // Update this job's status in local state
+            setJobs(prev =>
+              prev.map(j => j.id === jobId ? { ...j, setup_status: status } : j)
+            );
+            remaining.delete(jobId);
+          }
+        } catch (_) {
+          remaining.delete(jobId); // Stop polling if error
+        }
+      }
+
+      // Stop polling when all done
+      if (remaining.size === 0) {
+        clearInterval(setupPollRef.current);
+        setupPollRef.current = null;
+      }
+    }, 3000); // Poll every 3 seconds
   };
 
   const handleSearch = (e) => {
