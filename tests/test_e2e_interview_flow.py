@@ -197,7 +197,7 @@ def auth(email, password, name):
 
 def get_or_create_job(token):
     headers = {"Authorization": f"Bearer {token}"}
-    jobs = requests.get(f"{TB_API}/api/jobs/", headers=headers).json()
+    jobs = requests.get(f"{TB_API}/api/jobs", headers=headers).json()
     for job in jobs:
         if "[E2E-TEST]" in job.get("title", ""):
             print(f"  Found existing job {job['id']}: {job['title']}")
@@ -205,7 +205,7 @@ def get_or_create_job(token):
                 requests.post(f"{TB_API}/api/jobs/{job['id']}/publish",
                               headers=headers)
             return job
-    r = requests.post(f"{TB_API}/api/jobs/", headers=headers, json=TEST_JOB)
+    r = requests.post(f"{TB_API}/api/jobs", headers=headers, json=TEST_JOB)
     if r.status_code not in (200, 201):
         raise RuntimeError(f"Job creation failed: {r.text}")
     job = r.json()

@@ -412,3 +412,28 @@ async def update_screening(
     db.commit()
     db.refresh(s)
     return s
+
+
+@router.patch("/{screening_id}/status")
+async def update_screening_status(
+    screening_id: int,
+    body: dict,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update the recruiter status for a screening (advance/reject).
+    Valid statuses: "advanced" | "rejected" | "pending"
+    """
+    s = db.query(models.Screening).filter(models.Screening.id == screening_id).first()
+    if not s:
+        raise HTTPException(404, "Screening not found")
+
+    status_value = body.get("status", "pending")
+    valid_statuses = ["advanced", "rejected", "pending"]
+    if status_value not in valid_statuses:
+        raise HTTPException(400, f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
+
+    s.recruiter_status = status_value
+    db.commit()
+    return {"screening_id": screening_id, "status": status_value}

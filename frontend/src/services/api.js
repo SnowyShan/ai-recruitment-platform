@@ -54,11 +54,11 @@ export const authAPI = {
 
 // Jobs API
 export const jobsAPI = {
-  getAll: (params) => api.get('/api/jobs/', { params }),
+  getAll: (params) => api.get('/api/jobs', { params }),
   getById: (id) => api.get(`/api/jobs/${id}`),
   getPipeline: (id) => api.get(`/api/jobs/${id}/pipeline`),
   getSetupStatus: (id) => api.get(`/api/jobs/${id}/setup-status`),
-  create: (data) => api.post('/api/jobs/', data),
+  create: (data) => api.post('/api/jobs', data),
   update: (id, data) => api.put(`/api/jobs/${id}`, data),
   delete: (id) => api.delete(`/api/jobs/${id}`),
   publish: (id) => api.post(`/api/jobs/${id}/publish`),
@@ -68,9 +68,9 @@ export const jobsAPI = {
 
 // Candidates API
 export const candidatesAPI = {
-  getAll: (params) => api.get('/api/candidates/', { params }),
+  getAll: (params) => api.get('/api/candidates', { params }),
   getById: (id) => api.get(`/api/candidates/${id}`),
-  create: (data) => api.post('/api/candidates/', data),
+  create: (data) => api.post('/api/candidates', data),
   update: (id, data) => api.put(`/api/candidates/${id}`, data),
   delete: (id) => api.delete(`/api/candidates/${id}`),
   uploadResume: (id, file) => {
@@ -85,9 +85,9 @@ export const candidatesAPI = {
 
 // Applications API
 export const applicationsAPI = {
-  getAll: (params) => api.get('/api/applications/', { params }),
+  getAll: (params) => api.get('/api/applications', { params }),
   getById: (id) => api.get(`/api/applications/${id}`),
-  create: (data) => api.post('/api/applications/', data),
+  create: (data) => api.post('/api/applications', data),
   update: (id, data) => api.put(`/api/applications/${id}`, data),
   delete: (id) => api.delete(`/api/applications/${id}`),
   shortlist: (id) => api.post(`/api/applications/${id}/shortlist`),
@@ -99,9 +99,9 @@ export const applicationsAPI = {
 // Screenings API
 export const screeningsAPI = {
   getByJob: () => api.get('/api/screenings/by-job'),
-  getAll: (params) => api.get('/api/screenings/', { params }),
+  getAll: (params) => api.get('/api/screenings', { params }),
   getById: (id) => api.get(`/api/screenings/${id}`),
-  create: (data) => api.post('/api/screenings/', data),
+  create: (data) => api.post('/api/screenings', data),
   update: (id, data) => api.put(`/api/screenings/${id}`, data),
   start: (id) => api.post(`/api/screenings/${id}/start`),
   complete: (id) => api.post(`/api/screenings/${id}/complete`),
@@ -136,7 +136,7 @@ export const publicAPI = {
 
 // Support API
 export const supportAPI = {
-  create: (data) => api.post('/api/support/', data),
+  create: (data) => api.post('/api/support', data),
   getMyRequests: () => api.get('/api/support/my-requests'),
 };
 

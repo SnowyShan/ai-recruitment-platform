@@ -308,16 +308,36 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
   const numTechnical = Math.max(1, Math.round(8 * (1 - formData.interview_behavioral_pct / 100)));
 
   const generateDescription = async () => {
-    if (!jdPrompt.trim()) return;
+    // Build prompt from form fields + optional extra context
+    const parts = [];
+    if (formData.title) parts.push(formData.title);
+    if (formData.department) parts.push(`Department: ${formData.department}`);
+    if (formData.location) parts.push(`Location: ${formData.location}`);
+    if (formData.job_type) parts.push(`Type: ${formData.job_type}`);
+    if (formData.experience_level) parts.push(`Level: ${formData.experience_level}`);
+    if (formData.salary_min && formData.salary_max) parts.push(`Salary: $${formData.salary_min}–$${formData.salary_max}`);
+    else if (formData.salary_min) parts.push(`Salary from $${formData.salary_min}`);
+    if (jdPrompt.trim()) parts.push(jdPrompt.trim());
+
+    if (parts.length === 0) {
+      alert('Please fill in at least the Job Title before generating.');
+      return;
+    }
+
     setGenerating(true);
     try {
       const res = await fetch('http://localhost:8000/api/jobs/generate-description', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: jdPrompt })
+        body: JSON.stringify({ prompt: parts.join(', ') })
       });
       const data = await res.json();
-      setFormData(prev => ({ ...prev, description: data.description }));
+      setFormData(prev => ({
+        ...prev,
+        description: data.description || prev.description,
+        requirements: data.requirements || prev.requirements,
+        skills_required: data.skills || prev.skills_required,
+      }));
     } catch (err) {
       console.error('Failed to generate description:', err);
       alert('Failed to generate description. Please try again.');
@@ -414,7 +434,7 @@ const CreateJobModal = ({ onClose, onSuccess }) => {
                   <input
                     type="text"
                     className="input flex-1"
-                    placeholder='e.g. "Senior iOS Engineer, SwiftUI + on-device ML, 5+ years"'
+                    placeholder='Optional: add extra context, e.g. "focus on SwiftUI + on-device ML"'
                     value={jdPrompt}
                     onChange={e => setJdPrompt(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && generateDescription()}

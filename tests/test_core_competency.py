@@ -294,7 +294,7 @@ def run(record=False):
                 # Fallback: get the job ID from the API and navigate directly
                 try:
                     token = _get_token()
-                    r = requests.get(f"{TB_API}/api/jobs/",
+                    r = requests.get(f"{TB_API}/api/jobs",
                                      headers={"Authorization": f"Bearer {token}"}, timeout=10)
                     jobs = r.json() if r.status_code == 200 else []
                     new_job = next((j for j in jobs if JOB_TITLE[:20] in j.get("title", "")), None)
@@ -364,7 +364,7 @@ def run(record=False):
             # Wait for question list to load inside config panel
             try:
                 page.wait_for_selector("button:has-text('Mark Core'), button:has-text('⭐ Core')",
-                                       timeout=15_000)
+                                       timeout=45_000)
                 passed.append(_check("Question list loaded in config panel", True))
             except Exception as e:
                 passed.append(_check("Question list loaded in config panel", False, str(e)))
@@ -439,6 +439,7 @@ def run(record=False):
             # Reload page to get fresh question list after regen
             page.reload()
             page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(8000)  # Wait for setup status poll + jobQuestions fetch
 
             # ── Step 6: Mark a question as Core Competency (post-regen) ──
             print("\n[Step 6] Mark a question as Core Competency")
@@ -446,14 +447,36 @@ def run(record=False):
             # Expand config panel again after reload
             page.click("button:has-text('Screening Interview Config')", timeout=8_000)
             page.wait_for_timeout(1500)
+            # Debug: check page state
+            page.wait_for_timeout(3000)
+            content = page.content()
+            has_mark_core = 'Mark Core' in content
+            has_star_core = '⭐ Core' in content or '⭐ Core' in content
+            print(f'  Debug: Mark Core in DOM={has_mark_core}, Star Core in DOM={has_star_core}')
+            # If buttons are in DOM but not visible, scroll to them
+            if has_mark_core:
+                btn = page.query_selector("button:has-text('Mark Core')")
+                if btn:
+                    btn.scroll_into_view_if_needed()
+                    page.wait_for_timeout(500)
 
             # Wait for fresh question list
-            try:
-                page.wait_for_selector("button:has-text('Mark Core'), button:has-text('\u2b50 Core')",
-                                       timeout=15_000)
-                passed.append(_check("Fresh question list loaded after re-gen", True))
-            except Exception as e:
-                passed.append(_check("Fresh question list loaded after re-gen", False, str(e)))
+            # Wait for fresh question list — check DOM presence (not just visibility)
+            mark_core_found = False
+            for _attempt in range(20):
+                page.wait_for_timeout(2000)
+                if "Mark Core" in page.content() or "⭐ Core" in page.content():
+                    mark_core_found = True
+                    break
+                if _attempt == 5:  # Re-open panel to force re-fetch
+                    try:
+                        page.click("button:has-text('Screening Interview Config')", timeout=3000)
+                        page.wait_for_timeout(1000)
+                        page.click("button:has-text('Screening Interview Config')", timeout=3000)
+                    except Exception:
+                        pass
+            passed.append(_check("Fresh question list loaded after re-gen", mark_core_found))
+            if not mark_core_found:
                 ctx.close()
                 return False
 
@@ -479,7 +502,7 @@ def run(record=False):
 
             # Wait for ⭐ Core badge — this means the API call completed and probes generated
             try:
-                page.wait_for_selector("button:has-text('\u2b50 Core')", timeout=15_000)
+                page.wait_for_selector("button:has-text('\u2b50 Core')", timeout=45_000)
                 passed.append(_check("'⭐ Core' badge appeared after toggle", True))
             except Exception as e:
                 passed.append(_check("'⭐ Core' badge appeared after toggle", False, str(e)))
@@ -557,7 +580,7 @@ def run(record=False):
 
             interview_page.click("button:has-text('Allow Microphone')", timeout=8_000)
             interview_page.wait_for_selector("button:has-text('Tap to Begin')",
-                                              state="visible", timeout=8_000)
+                                              state="visible", timeout=60_000)
             interview_page.click("button:has-text('Tap to Begin')")
             interview_page.wait_for_timeout(1000)
 

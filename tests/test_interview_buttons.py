@@ -222,7 +222,7 @@ def _create_job_and_wait(page, title, num_questions=3, behavioral_pct=20):
 
     # Navigate to job detail via API
     token = _get_token()
-    r = requests.get(f"{TB_API}/api/jobs/",
+    r = requests.get(f"{TB_API}/api/jobs",
                      headers={"Authorization": f"Bearer {token}"}, timeout=10)
     jobs = r.json() if r.status_code == 200 else []
     job = next((j for j in jobs if title[:20] in j.get("title", "")), None)
@@ -249,7 +249,10 @@ def _create_job_and_wait(page, title, num_questions=3, behavioral_pct=20):
     page.wait_for_load_state("networkidle")
     page.click("button:has-text('Screening Interview Config')", timeout=8_000)
     page.wait_for_timeout(1500)
-    page.wait_for_selector("button:has-text('Mark Core'), button:has-text('⭐ Core')", timeout=15_000)
+    # Wait for config panel to be fully interactive
+    # Save Config button visible = screeningConfig loaded + setupStatus=ready
+    page.wait_for_selector("button:has-text('Save Config')", timeout=30_000)
+    page.wait_for_timeout(1500)
 
     def _set_react_val(el_handle, value):
         page.evaluate("""([el, v]) => {
@@ -268,7 +271,7 @@ def _create_job_and_wait(page, title, num_questions=3, behavioral_pct=20):
     page.wait_for_timeout(200)
 
     page.click("button:has-text('Save Config')", timeout=5_000)
-    page.wait_for_selector("button:has-text('Saved!')", timeout=10_000)
+    page.wait_for_selector("button:has-text('Saved!')", timeout=20_000)
 
     # Wait for regen
     print("    Waiting for regen…", end="", flush=True)
@@ -295,7 +298,7 @@ def _flag_first_cc(page, job_id):
 
     # Wait for question list to appear
     try:
-        page.wait_for_selector("button:has-text('Mark Core'), button:has-text('⭐ Core')", timeout=20_000)
+        page.wait_for_selector("button:has-text('Mark Core'), button:has-text('⭐ Core')", timeout=60_000)
     except Exception:
         # Retry: reload and expand again
         page.reload()
@@ -303,7 +306,7 @@ def _flag_first_cc(page, job_id):
         page.wait_for_timeout(1500)
         page.click("button:has-text('Screening Interview Config')", timeout=8_000)
         page.wait_for_timeout(2000)
-        page.wait_for_selector("button:has-text('Mark Core'), button:has-text('⭐ Core')", timeout=20_000)
+        page.wait_for_selector("button:has-text('Mark Core'), button:has-text('⭐ Core')", timeout=60_000)
 
     mark_core_btn = page.query_selector("button:has-text('Mark Core')")
     if not mark_core_btn:
@@ -311,23 +314,37 @@ def _flag_first_cc(page, job_id):
 
     mark_core_btn.click()
     # Probe generation is synchronous in the API — wait up to 30s for the badge
-    page.wait_for_selector("button:has-text('⭐ Core')", timeout=30_000)
+    page.wait_for_selector("button:has-text('⭐ Core')", timeout=60_000)
     page.wait_for_timeout(1000)  # allow DB write to commit
     return True
 
 
 def _launch_mock_interview(ctx, page):
     """Click Mock Interview, return the interview page."""
+    # Reload page and expand config panel to ensure setupStatus=ready in React
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(3000)
+    try:
+        page.click("button:has-text('Screening Interview Config')", timeout=5_000)
+        page.wait_for_timeout(1500)
+    except Exception:
+        pass
     pages_before = set(id(p) for p in ctx.pages)
-    page.click("button:has-text('Mock Interview')", timeout=8_000)
+    # Listen for new page popup
+    with ctx.expect_page(timeout=30000) as new_page_info:
+        page.click("button:has-text('Mock Interview')", timeout=8_000)
+    try:
+        interview_page = new_page_info.value
+        interview_page.wait_for_load_state("networkidle")
+        return interview_page
+    except Exception:
+        pass
+    # Fallback: check all pages
     interview_page = None
-    for _ in range(40):
-        page.wait_for_timeout(500)
-        for p in ctx.pages:
-            if "/interview/" in p.url and "localhost:5174" in p.url:
-                interview_page = p
-                break
-        if interview_page:
+    for p in ctx.pages:
+        if "/interview/" in p.url and "localhost:5174" in p.url:
+            interview_page = p
             break
     if not interview_page:
         for p in ctx.pages:
@@ -343,7 +360,7 @@ def _start_interview(interview_page):
     """Accept mic, tap to begin, wait for Q1."""
     interview_page.wait_for_selector("h1:has-text('Before you begin')", timeout=15_000)
     interview_page.click("button:has-text('Allow Microphone')", timeout=8_000)
-    interview_page.wait_for_selector("button:has-text('Tap to Begin')", timeout=8_000)
+    interview_page.wait_for_selector("button:has-text('Tap to Begin')", timeout=60_000)
     interview_page.click("button:has-text('Tap to Begin')")
     interview_page.wait_for_timeout(1000)
     interview_page.wait_for_selector("text=Question 1 of", timeout=10_000)

@@ -485,7 +485,11 @@ def generate_report_from_transcript(
     )
 
     core_competency_guidelines = """
-For questions marked [CORE_COMPETENCY] in the transcript, also return a "core_competency_probes" array in that question's per_question entry: [{"question": "...", "candidate_answer": "...", "expected_answer": "...", "pass": true/false}]. Parse these from [PROBE_N: ...] markers in the transcript."""
+For questions marked [CORE_COMPETENCY] in the transcript, also return a "core_competency_probes" array in that question's per_question entry: [{"question": "...", "candidate_answer": "...", "expected_answer": "...", "pass": true/false}]. Parse these from [PROBE_N: ...] markers in the transcript.
+
+When CONVERSATIONAL_PROBES mode was used, the probe answers immediately follow each [PROBE_N] marker as the next spoken segment. Parse accordingly.
+
+Do NOT assign a numeric overall_score to [CORE_COMPETENCY] questions — their evaluation is captured entirely in the core_competency_probes array. Exclude them from aggregate score calculation."""
 
     code_eval_guidelines = ""
     if non_empty_code:

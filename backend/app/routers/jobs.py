@@ -5,8 +5,11 @@ from typing import List, Optional
 from .. import models, schemas, auth
 from ..database import get_db
 import json, os, httpx
+import anthropic
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 INTERVIEW_API_URL = os.getenv("INTERVIEW_API_URL", "http://localhost:8001")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 _SCREENING_CONFIG_FIELDS = {
     "interview_time_limit", "interview_num_questions",
@@ -398,8 +401,195 @@ async def close_job(
     
     # Log activity
     log_activity(db, current_user.id, "job_closed", "job", job.id)
-    
+
     return job
+
+
+@router.post("/generate-description")
+async def generate_job_description(request: dict):
+    """
+    Takes a short recruiter prompt and returns a full professional job description.
+    """
+    prompt_text = request.get("prompt", "")
+    if not prompt_text or not prompt_text.strip():
+        raise HTTPException(status_code=422, detail="prompt is required")
+
+    if not ANTHROPIC_API_KEY or ANTHROPIC_API_KEY == "your-key-here":
+        raise HTTPException(status_code=500, detail="Anthropic API key not configured")
+
+    claude_prompt = f"""You are an expert technical recruiter. Generate a professional job description based on this brief:
+
+"{prompt_text}"
+
+Return a JSON object with exactly these three keys:
+{{
+  "description": "A 2-3 paragraph role overview covering what the team does, what the candidate will work on, and why it's exciting. No bullet points here.",
+  "requirements": "A plain list of 5-7 required qualifications, one per line, starting with a dash. Include years of experience, must-have skills, and domain knowledge. No markdown headers.",
+  "skills": "A comma-separated list of 6-10 specific technical skills and tools (e.g. Swift, SwiftUI, Core Data, REST APIs, Git). Just the skill names, comma-separated, no bullets or headers."
+}}
+
+Be specific and realistic. Use the tech stack and seniority level implied by the prompt. Avoid buzzword inflation. Return only valid JSON, no other text."""
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10))
+    def call_claude():
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": claude_prompt}],
+            timeout=30.0,
+        )
+        return response.content[0].text
+
+    try:
+        import json as _json
+        raw = call_claude()
+        # Parse JSON response
+        try:
+            # Strip markdown code fences if Claude wrapped it
+            clean = raw.strip()
+            if clean.startswith('```'):
+                clean = clean.split('```')[1]
+                if clean.startswith('json'):
+                    clean = clean[4:]
+            parsed = _json.loads(clean)
+            return {
+                "description": parsed.get("description", ""),
+                "requirements": parsed.get("requirements", ""),
+                "skills": parsed.get("skills", ""),
+            }
+        except Exception:
+            # Fallback: return raw as description if JSON parse fails
+            return {"description": raw, "requirements": "", "skills": ""}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate description: {str(e)}")
+
+
+@router.get("/{job_id}/insights")
+async def get_job_insights(
+    job_id: int,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Returns aggregate analytics for all completed interviews for a job.
+    """
+    # 1. Fetch all completed screenings for this job
+    screenings = db.query(models.Screening).filter(
+        models.Screening.application_id.in_(
+            db.query(models.Application.id).filter(models.Application.job_id == job_id).all()
+        ),
+        models.Screening.status == "completed",
+        models.Screening.overall_score.isnot(None)
+    ).all()
+
+    if not screenings:
+        return {"job_id": job_id, "candidate_count": 0, "insights": None}
+
+    # 2. Build candidate reports from screening data
+    reports = []
+    for screening in screenings:
+        if screening.application and screening.application.candidate:
+            reports.append({
+                "screening_id": screening.id,
+                "candidate_id": screening.application.candidate.id,
+                "candidate_name": screening.application.candidate.full_name,
+                "overall_score": screening.overall_score or 0,
+                "recommendation": screening.recommendation or "",
+                "interview_session_id": screening.interview_session_id,
+            })
+
+    # 3. Compute aggregate stats
+    scores = [r["overall_score"] for r in reports]
+    avg_score = sum(scores) / len(scores) if scores else 0
+
+    # Score distribution buckets: 0-20, 20-40, 40-60, 60-80, 80-100
+    distribution = {"0-20": 0, "20-40": 0, "40-60": 0, "60-80": 0, "80-100": 0}
+    for s in scores:
+        if s < 20: distribution["0-20"] += 1
+        elif s < 40: distribution["20-40"] += 1
+        elif s < 60: distribution["40-60"] += 1
+        elif s < 80: distribution["60-80"] += 1
+        else: distribution["80-100"] += 1
+
+    # 4. Call Claude to synthesize cohort-level strengths/weaknesses
+    cohort_summary = await synthesize_cohort_insights(reports)
+
+    return {
+        "job_id": job_id,
+        "candidate_count": len(reports),
+        "average_score": round(avg_score, 2),
+        "score_distribution": distribution,
+        "cohort_summary": cohort_summary,
+        "candidates": sorted(reports, key=lambda r: r["overall_score"], reverse=True)
+    }
+
+
+async def synthesize_cohort_insights(reports: list) -> dict:
+    """
+    Uses Claude to identify common patterns across all candidate reports.
+    Returns: { "common_strengths": [...], "common_weaknesses": [...], "hiring_recommendation": str }
+    """
+    if not reports or len(reports) == 0:
+        return {
+            "common_strengths": [],
+            "common_weaknesses": [],
+            "hiring_recommendation": "No candidate data available."
+        }
+
+    if not ANTHROPIC_API_KEY or ANTHROPIC_API_KEY == "your-key-here":
+        return {
+            "common_strengths": ["Resume alignment"],
+            "common_weaknesses": ["Technical depth"],
+            "hiring_recommendation": "Review candidates individually."
+        }
+
+    summaries = []
+    for r in reports:
+        summaries.append(
+            f"Candidate: {r['candidate_name']} | Score: {r['overall_score']}/100\n"
+            f"Recommendation: {r['recommendation'] or 'N/A'}"
+        )
+
+    prompt = f"""You are analyzing a cohort of {len(reports)} candidates who interviewed for the same role.
+
+Here are their individual evaluations:
+
+{chr(10).join(summaries)}
+
+Based on all candidates:
+1. What are the 2-3 most common STRENGTHS across this cohort?
+2. What are the 2-3 most common WEAKNESSES or gaps?
+3. Give a 1-sentence hiring recommendation (e.g., "Strong cohort — top 3 candidates are ready to advance" or "Weak pipeline — consider re-sourcing")
+
+Respond as JSON:
+{{
+  "common_strengths": ["...", "..."],
+  "common_weaknesses": ["...", "..."],
+  "hiring_recommendation": "..."
+}}"""
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10))
+    def call_claude():
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}],
+            timeout=30.0,
+        )
+        return response.content[0].text
+
+    try:
+        response = call_claude()
+        return json.loads(response)
+    except Exception as e:
+        print(f"[Insights] Claude cohort analysis failed: {e}")
+        return {
+            "common_strengths": ["Technical skills"],
+            "common_weaknesses": ["Communication"],
+            "hiring_recommendation": "Review candidates individually."
+        }
 
 
 def log_activity(db: Session, user_id: int, action: str, entity_type: str = None, entity_id: int = None, details: str = None):

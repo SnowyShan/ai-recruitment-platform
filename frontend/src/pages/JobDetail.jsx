@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   MapPin,
@@ -24,6 +24,7 @@ import {
   Save,
   PlayCircle,
   Loader2,
+  BarChart3,
 } from 'lucide-react';
 import { jobsAPI, applicationsAPI, screeningsAPI } from '../services/api';
 import axios from 'axios';
@@ -517,6 +518,7 @@ function ReportModal({ screening, onClose }) {
 
 export default function JobDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
 
   const [job, setJob]               = useState(null);
   const [pipeline, setPipeline]     = useState(null);
@@ -704,7 +706,20 @@ export default function JobDetail() {
           params: { domain, job_id: id, limit: 50 }
         });
         setJobQuestions(qRes.data.questions || []);
-      } catch (_) {}
+      } catch (err) {
+        console.warn('[JobDetail] Failed to load question bank:', err?.message);
+        // Retry once after 3s
+        setTimeout(async () => {
+          try {
+            const res = await axios.get(`${INTERVIEW_API}/api/interview/job/${id}/setup/status`);
+            const domain = res.data.domain || 'all';
+            const qRes = await axios.get(`${INTERVIEW_API}/api/interview/question-bank`, {
+              params: { domain, job_id: id, limit: 50 }
+            });
+            setJobQuestions(qRes.data.questions || []);
+          } catch (_) {}
+        }, 3000);
+      }
     };
     load();
   }, [setupStatus, id, INTERVIEW_API]);
@@ -924,6 +939,13 @@ Experience: 5 years of relevant industry experience.`;
 
           {/* Action buttons */}
           <div className="flex gap-2 flex-wrap">
+            <Link
+              to={`/jobs/${id}/insights`}
+              className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+              View Insights
+            </Link>
             {job.status === 'draft' && (
               <button
                 onClick={() => handleJobAction('publish')}
@@ -1001,7 +1023,20 @@ Experience: 5 years of relevant industry experience.`;
       {/* ── Screening Config ── */}
       <div className="card overflow-hidden">
         <button
-          onClick={() => setShowScreeningConfig(v => !v)}
+          onClick={async () => {
+            setShowScreeningConfig(v => !v);
+            // Re-fetch questions when panel is opened so they're always fresh
+            if (!showScreeningConfig && id) {
+              try {
+                const sRes = await axios.get(`${INTERVIEW_API}/api/interview/job/${id}/setup/status`);
+                const domain = sRes.data.domain || 'all';
+                const qRes = await axios.get(`${INTERVIEW_API}/api/interview/question-bank`, {
+                  params: { domain, job_id: id, limit: 50 }
+                });
+                setJobQuestions(qRes.data.questions || []);
+              } catch (_) {}
+            }
+          }}
           className="w-full flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors"
         >
           <div className="flex items-center gap-2 text-slate-700 font-semibold">
@@ -1185,7 +1220,11 @@ Experience: 5 years of relevant industry experience.`;
               {videoPreviewUrl && (
                 <div className="mt-3 flex justify-center">
                   <video src={videoPreviewUrl} controls autoPlay className="rounded-xl max-h-48 shadow-sm border border-slate-200" />
-            {/* Screening Automation Toggle */}
+                </div>
+              )}
+            </div>
+
+              {/* Screening Automation Toggle */}
             <div className="sm:col-span-2 pt-4 border-t border-slate-100 flex flex-col gap-4">
               <label className="flex items-center gap-3 cursor-pointer select-none">
                 <button
@@ -1259,6 +1298,16 @@ Experience: 5 years of relevant industry experience.`;
 
       {/* ── Candidate Table ── */}
       <div className="card overflow-hidden">
+        {/* Header with View Insights button */}
+        <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-900">Candidates</h2>
+          <button
+            onClick={() => navigate(`/jobs/${job.id}/insights`)}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+          >
+            📊 View Hiring Insights
+          </button>
+        </div>
         {applications.length === 0 ? (
           <div className="py-16 text-center text-slate-400 text-sm">
             No candidates match this filter.

@@ -164,6 +164,7 @@ class Screening(Base):
     overall_score = Column(Float, nullable=True)
     ai_evaluation = Column(Text, nullable=True)  # JSON string of detailed evaluation
     recommendation = Column(String(50), nullable=True)
+    recruiter_status = Column(String(50), default="pending")  # "pending" | "advanced" | "rejected"
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

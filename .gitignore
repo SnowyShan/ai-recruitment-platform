@@ -59,3 +59,4 @@ logs/
 
 tests/recordings/
 interview-module/backend/audio/*.mp3
+agentInstructions/

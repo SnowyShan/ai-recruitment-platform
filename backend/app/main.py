@@ -42,6 +42,12 @@ async def lifespan(app: FastAPI):
                         "ALTER TABLE screenings ADD COLUMN source VARCHAR(20) DEFAULT 'manual'"
                     )
                 )
+            if "recruiter_status" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE screenings ADD COLUMN recruiter_status VARCHAR(50) DEFAULT 'pending'"
+                    )
+                )
                 
         if "jobs" in insp.get_table_names():
             cols = [c["name"] for c in insp.get_columns("jobs")]

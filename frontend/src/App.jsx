@@ -14,6 +14,7 @@ import ApplyJob from './pages/ApplyJob';
 import CandidateStatus from './pages/CandidateStatus';
 import JobDetail from './pages/JobDetail';
 import Help from './pages/Help';
+import InsightsDashboard from './pages/InsightsDashboard';
 
 
 function App() {
@@ -36,6 +37,7 @@ function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/jobs" element={<Jobs />} />
             <Route path="/jobs/:id" element={<JobDetail />} />
+            <Route path="/jobs/:jobId/insights" element={<InsightsDashboard />} />
             <Route path="/candidates" element={<Candidates />} />
             <Route path="/applications" element={<Applications />} />
             <Route path="/screenings" element={<Screenings />} />
