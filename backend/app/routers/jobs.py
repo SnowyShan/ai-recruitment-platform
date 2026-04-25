@@ -474,11 +474,17 @@ async def get_job_insights(
     """
     Returns aggregate analytics for all completed interviews for a job.
     """
-    # 1. Fetch all completed screenings for this job
+    # 1. Fetch application IDs as plain integers (not Row objects)
+    application_ids = [
+        row[0] for row in
+        db.query(models.Application.id).filter(models.Application.job_id == job_id).all()
+    ]
+    if not application_ids:
+        return {"job_id": job_id, "candidate_count": 0, "insights": None}
+
+    # 2. Fetch all completed screenings for this job
     screenings = db.query(models.Screening).filter(
-        models.Screening.application_id.in_(
-            db.query(models.Application.id).filter(models.Application.job_id == job_id).all()
-        ),
+        models.Screening.application_id.in_(application_ids),
         models.Screening.status == "completed",
         models.Screening.overall_score.isnot(None)
     ).all()
@@ -486,20 +492,45 @@ async def get_job_insights(
     if not screenings:
         return {"job_id": job_id, "candidate_count": 0, "insights": None}
 
-    # 2. Build candidate reports from screening data
+    # 3. Build candidate reports from screening data with full AI evaluation
     reports = []
     for screening in screenings:
-        if screening.application and screening.application.candidate:
-            reports.append({
-                "screening_id": screening.id,
-                "candidate_id": screening.application.candidate.id,
-                "candidate_name": screening.application.candidate.full_name,
-                "overall_score": screening.overall_score or 0,
-                "recommendation": screening.recommendation or "",
-                "interview_session_id": screening.interview_session_id,
-            })
+        if not (screening.application and screening.application.candidate):
+            continue
 
-    # 3. Compute aggregate stats
+        ev = {}
+        if screening.ai_evaluation:
+            try:
+                ev = json.loads(screening.ai_evaluation)
+            except Exception:
+                ev = {}
+
+        reports.append({
+            "screening_id": screening.id,
+            "candidate_id": screening.application.candidate.id,
+            "candidate_name": screening.application.candidate.full_name,
+            # Top-level scores
+            "overall_score": round(screening.overall_score or 0),
+            "technical_score": round(screening.technical_score) if screening.technical_score is not None else None,
+            "communication_score": round(screening.communication_score) if screening.communication_score is not None else None,
+            "cultural_fit_score": round(screening.cultural_fit_score) if screening.cultural_fit_score is not None else None,
+            "recommendation": screening.recommendation or "",
+            "recruiter_status": screening.recruiter_status or "pending",
+            # From ai_evaluation
+            "summary": ev.get("summary", ""),
+            "strengths": ev.get("strengths", []),
+            "weaknesses": ev.get("weaknesses", []),
+            "hiring_recommendation": ev.get("hiring_recommendation", ""),
+            "per_question": ev.get("per_question", []),
+            # Interview session link
+            "interview_session_id": screening.interview_session_id,
+        })
+
+    # 4. Fetch job skills
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    skills = [s.strip() for s in (job.skills_required or "").split(",") if s.strip()] if job else []
+
+    # 5. Compute aggregate stats
     scores = [r["overall_score"] for r in reports]
     avg_score = sum(scores) / len(scores) if scores else 0
 
@@ -512,11 +543,12 @@ async def get_job_insights(
         elif s < 80: distribution["60-80"] += 1
         else: distribution["80-100"] += 1
 
-    # 4. Call Claude to synthesize cohort-level strengths/weaknesses
+    # 6. Call Claude to synthesize cohort-level strengths/weaknesses
     cohort_summary = await synthesize_cohort_insights(reports)
 
     return {
         "job_id": job_id,
+        "job_skills": skills,
         "candidate_count": len(reports),
         "average_score": round(avg_score, 2),
         "score_distribution": distribution,
@@ -546,23 +578,27 @@ async def synthesize_cohort_insights(reports: list) -> dict:
 
     summaries = []
     for r in reports:
+        strengths_text = "; ".join(r.get("strengths", [])) or "none listed"
+        weaknesses_text = "; ".join(r.get("weaknesses", [])) or "none listed"
         summaries.append(
-            f"Candidate: {r['candidate_name']} | Score: {r['overall_score']}/100\n"
-            f"Recommendation: {r['recommendation'] or 'N/A'}"
+            f"Candidate: {r['candidate_name']}\n"
+            f"Overall: {r['overall_score']}/100 | Tech: {r.get('technical_score', 'N/A')} | "
+            f"Comm: {r.get('communication_score', 'N/A')} | Recommendation: {r['recommendation']}\n"
+            f"Strengths: {strengths_text}\n"
+            f"Weaknesses: {weaknesses_text}\n"
+            f"Hiring note: {r.get('hiring_recommendation', '')[:200]}"
         )
 
-    prompt = f"""You are analyzing a cohort of {len(reports)} candidates who interviewed for the same role.
-
-Here are their individual evaluations:
+    prompt = f"""You are analyzing {len(reports)} candidates who completed AI interviews for the same role.
 
 {chr(10).join(summaries)}
 
-Based on all candidates:
+Based on ALL candidates above:
 1. What are the 2-3 most common STRENGTHS across this cohort?
-2. What are the 2-3 most common WEAKNESSES or gaps?
-3. Give a 1-sentence hiring recommendation (e.g., "Strong cohort — top 3 candidates are ready to advance" or "Weak pipeline — consider re-sourcing")
+2. What are the 2-3 most common WEAKNESSES or skill gaps?
+3. Give a 1-sentence overall hiring recommendation for this cohort.
 
-Respond as JSON:
+Respond ONLY as JSON:
 {{
   "common_strengths": ["...", "..."],
   "common_weaknesses": ["...", "..."],
@@ -573,22 +609,23 @@ Respond as JSON:
     def call_claude():
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         response = client.messages.create(
-            model="claude-sonnet-4-5-20250929",
-            max_tokens=1500,
+            model="claude-haiku-4-5-20251001",
+            max_tokens=600,
             messages=[{"role": "user", "content": prompt}],
             timeout=30.0,
         )
         return response.content[0].text
 
     try:
-        response = call_claude()
-        return json.loads(response)
+        raw = call_claude()
+        clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        return json.loads(clean)
     except Exception as e:
         print(f"[Insights] Claude cohort analysis failed: {e}")
         return {
-            "common_strengths": ["Technical skills"],
-            "common_weaknesses": ["Communication"],
-            "hiring_recommendation": "Review candidates individually."
+            "common_strengths": [],
+            "common_weaknesses": [],
+            "hiring_recommendation": "Unable to generate cohort analysis."
         }
 
 
