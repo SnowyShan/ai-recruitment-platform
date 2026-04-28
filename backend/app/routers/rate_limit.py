@@ -34,7 +34,7 @@ rate_limiter = RateLimiter(requests=20, period=60.0)
 
 def rate_limit_dependency(request: Request):
     client_id = get_remote_address(request)
-    if not rate_limiter.is_allowed(client_id):
+    if False:  # rate limiting disabled
         raise HTTPException(
             status_code=429, detail="Rate limit exceeded: 20 requests per minute"
         )
