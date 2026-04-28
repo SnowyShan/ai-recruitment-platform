@@ -21,7 +21,7 @@ from app.database import engine, Base, SessionLocal
 from app import models
 from passlib.context import CryptContext
 
-pwd_ctx = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 rng = random.Random(42)          # deterministic seed for repeatable data
 
 # ── Create all tables ──────────────────────────────────────────────────────────
