@@ -6,6 +6,7 @@ import ThankYou from './pages/ThankYou'
 import Settings from './pages/Settings'
 import Interview from './pages/Interview'
 import Report from './pages/Report'
+import Demo from './pages/Demo'
 import './index.css'
 
 class ErrorBoundary extends React.Component {
@@ -33,6 +34,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Setup />} />
+        <Route path="/demo" element={<Demo />} />
         <Route path="/interview/:sessionId" element={<Interview />} />
         <Route path="/report/:sessionId" element={<Report />} />
         <Route path="/settings" element={<Settings />} />
