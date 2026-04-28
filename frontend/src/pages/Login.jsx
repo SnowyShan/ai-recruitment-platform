@@ -47,16 +47,13 @@ const Login = () => {
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-primary-600 via-primary-700 to-primary-900 p-12 flex-col justify-between relative overflow-hidden">
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC4wNSI+PHBhdGggZD0iTTM2IDM0djItSDI0di0yaDEyek0zNiAzMHYySDI0di0yaDEyek0zNiAyNnYySDI0di0yaDEyeiIvPjwvZz48L2c+PC9zdmc+')] opacity-30"></div>
         
-        <div className="relative z-10">
-          <div className="mb-2">
-            <Logo variant="horizontal" theme="white" size="lg" />
-          </div>
+        <div className="relative z-10 flex flex-col items-center text-center">
+          <Logo variant="stacked" theme="white" size="2xl" />
         </div>
 
         <div className="relative z-10 space-y-6">
-          <h1 className="text-4xl lg:text-5xl font-bold text-white leading-tight">
-            Intelligent hiring,<br />
-            <span className="text-accent-300">simplified.</span>
+          <h1 className="text-3xl font-bold text-white/90 leading-tight">
+            AI-powered recruitment platform that helps you find the perfect candidates faster and smarter.
           </h1>
           <p className="text-lg text-white/80 max-w-md">
             AI-powered recruitment platform that helps you find the perfect candidates faster and smarter.

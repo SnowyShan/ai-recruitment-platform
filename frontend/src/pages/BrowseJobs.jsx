@@ -72,7 +72,7 @@ const BrowseJobs = () => {
       <header className="bg-white border-b border-slate-200">
         <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
           <Link to="/">
-            <Logo variant="horizontal" theme="purple" size="sm" />
+            <Logo variant="horizontal" theme="purple" size="md" />
           </Link>
           <Link to="/my-applications" className="text-sm text-primary-600 hover:text-primary-700 font-medium">
             Check my application status →

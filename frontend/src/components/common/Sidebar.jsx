@@ -60,7 +60,7 @@ const Sidebar = ({ isOpen, onClose }) => {
       >
         {/* Logo + close button (close only shown on mobile) */}
         <div className="h-16 px-6 flex items-center gap-3 border-b border-slate-100">
-          <Logo variant="horizontal" theme="purple" size="md" />
+          <Logo variant="horizontal" theme="purple" size="lg" />
           {/* Close button — mobile only */}
           <button
             onClick={onClose}
