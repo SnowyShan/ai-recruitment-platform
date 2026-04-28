@@ -1,5 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import Logo from './Logo';
 import {
   LayoutDashboard,
   Briefcase,
@@ -8,7 +9,6 @@ import {
   MessageSquare,
   Settings,
   LogOut,
-  Sparkles,
   ChevronRight,
   HelpCircle,
   X,
@@ -60,13 +60,7 @@ const Sidebar = ({ isOpen, onClose }) => {
       >
         {/* Logo + close button (close only shown on mobile) */}
         <div className="h-16 px-6 flex items-center gap-3 border-b border-slate-100">
-          <div className="w-9 h-9 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center shadow-lg shadow-primary-500/25 flex-shrink-0">
-            <Sparkles className="w-5 h-5 text-white" />
-          </div>
-          <div className="flex-1">
-            <span className="font-bold text-slate-900">TalentBridge</span>
-            <span className="text-primary-600 font-bold"> AI</span>
-          </div>
+          <Logo variant="horizontal" theme="purple" size="md" />
           {/* Close button — mobile only */}
           <button
             onClick={onClose}

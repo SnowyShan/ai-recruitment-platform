@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Eye, EyeOff, Sparkles, ArrowRight, Mail, Lock } from 'lucide-react';
+import Logo from '../components/common/Logo';
+import { Eye, EyeOff, ArrowRight, Mail, Lock } from 'lucide-react';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -47,11 +48,8 @@ const Login = () => {
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC4wNSI+PHBhdGggZD0iTTM2IDM0djItSDI0di0yaDEyek0zNiAzMHYySDI0di0yaDEyek0zNiAyNnYySDI0di0yaDEyeiIvPjwvZz48L2c+PC9zdmc+')] opacity-30"></div>
         
         <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-12 h-12 bg-white/10 backdrop-blur-sm rounded-xl flex items-center justify-center">
-              <Sparkles className="w-7 h-7 text-white" />
-            </div>
-            <span className="text-2xl font-bold text-white">TalentBridge AI</span>
+          <div className="mb-2">
+            <Logo variant="horizontal" theme="white" size="lg" />
           </div>
         </div>
 
@@ -88,11 +86,8 @@ const Login = () => {
       {/* Right side - Login Form */}
       <div className="flex-1 flex items-center justify-center p-8 bg-slate-50">
         <div className="w-full max-w-md">
-          <div className="lg:hidden flex items-center gap-3 mb-8 justify-center">
-            <div className="w-10 h-10 bg-primary-600 rounded-xl flex items-center justify-center">
-              <Sparkles className="w-6 h-6 text-white" />
-            </div>
-            <span className="text-xl font-bold text-slate-900">TalentBridge AI</span>
+          <div className="lg:hidden flex justify-center mb-8">
+            <Logo variant="horizontal" theme="purple" size="md" />
           </div>
 
           <div className="text-center mb-8">
