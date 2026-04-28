@@ -120,6 +120,14 @@ DB_PATH=./interview.db
 TALENTBRIDGE_API_URL=http://localhost:8000
 ```
 
+### frontend/.env (main frontend)
+```
+VITE_API_URL=https://148.100.78.222
+VITE_INTERVIEW_API_URL=http://localhost:8001
+VITE_INTERVIEW_URL=https://148.100.78.222/interview
+VITE_BYPASS_CAPTCHA=true
+```
+
 ### interview-module/frontend/.env
 ```
 VITE_API_URL=https://148.100.78.222
@@ -315,3 +323,4 @@ sudo systemctl reload nginx
 8. **Vite 6 segfaults on s390x** — use Vite 5.
 9. **The zip extracts to `ai-recruitment-platform`** not `ai-recruitment-platform-main` — use `cp -r` to merge.
 10. **Database schema changes need manual migrations** — `create_all` only creates new tables, not columns.
+11. **Both frontends need `VITE_API_URL=https://...`** — without it they default to `localhost` which fails from the browser on a remote server.
